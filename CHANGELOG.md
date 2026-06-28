@@ -5,6 +5,9 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Fixed
+- **Roster timestamp hardening (partial).** Entries dated implausibly far in the future are
+  dropped, and a member can't sign an `Add` backdated to before its own admission. (The deeper
+  backdate-past-a-freeze case still needs causal ordering — tracked in TODO.)
 - **Virtual-IP assignment race.** Member IPs are now derived deterministically from the NodeId
   during the roster fold (collision-free and identical on every node), instead of being chosen
   by whoever approves the join — so two simultaneous approvals can no longer assign the same

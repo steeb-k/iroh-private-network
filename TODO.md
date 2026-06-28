@@ -26,10 +26,12 @@ Legend: **★ recommended next** · ⚠️ known gap/risk in the current code ·
   master key live in files under the data dir. Move them to the OS keystore (Windows DPAPI /
   Credential Manager, macOS Keychain, Linux Secret Service via the `keyring` crate) with a
   file fallback, mirroring seed-sync.
-- ⚠️ **Roster ordering trusts wall-clock timestamps.** Entries are ordered by `ts` (then content
-  hash). A member could backdate/forward-date `ts` to influence ordering (e.g. around a
-  freeze/remove). Investigate logical clocks / a signed monotonic version, and clamp/validate
-  timestamps. Clock skew between honest machines is the benign version of the same problem.
+- 🟡 **Roster ordering trusts wall-clock timestamps — partially mitigated.** Done: far-future
+  timestamps are dropped (`MAX_FUTURE_SKEW_MS`), and a member can't sign an `Add` backdated to
+  before its own admission. **Residual:** a current member could still backdate an `Add` into a
+  past *unfrozen* window to slip a device past a freeze. Fully closing it needs causal ordering
+  (hash-linked DAG / version vectors) — bigger change, deferred; originator remove/rotate is the
+  backstop. (Honest clock skew between members is the benign version of the same thing.)
 - ⚠️ **Doc can be spammed.** Any holder of the network secret can append entries to the iroh-docs
   replica; a malicious member could bloat it. Consider roster compaction/snapshots, entry caps,
   and pruning superseded entries. (Rotate is the blunt reset.)

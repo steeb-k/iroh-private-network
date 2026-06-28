@@ -40,6 +40,16 @@ pub type Id = [u8; 32];
 
 const DOMAIN: &str = "ipn-roster-v1";
 
+/// Entries timestamped more than this far in the future are dropped. Timestamps
+/// are member-chosen, so they're only a *hint* for ordering, not a trust anchor.
+///
+/// Residual (documented, not fully fixed here): a current member could still
+/// backdate an `Add` into a past *unfrozen* window to slip a device past a freeze.
+/// Fully preventing that needs causal ordering (a hash-linked DAG / version
+/// vectors) — deferred. The backstop is that such an attacker is already a trusted
+/// member, and the originator can remove the device or rotate the secret.
+const MAX_FUTURE_SKEW_MS: u64 = 24 * 60 * 60 * 1000;
+
 /// A membership operation. Every variant carries a logical timestamp (`ts`,
 /// milliseconds since the Unix epoch) used only to order a concurrent set of
 /// entries deterministically; exact wall-clock accuracy is not required.
@@ -174,9 +184,12 @@ impl Roster {
     /// outcome, only waste space.
     pub fn build(cfg: &Config, entries: &[Entry]) -> Roster {
         // 1. Keep only authentic entries for this network. Dedup by content id.
+        //    Drop entries timestamped implausibly far in the future (anti
+        //    forward-dating; bounds the ordering games a member can play).
+        let ceiling = now_ms().saturating_add(MAX_FUTURE_SKEW_MS);
         let mut valid: BTreeMap<[u8; 32], &Entry> = BTreeMap::new();
         for e in entries {
-            if e.network_id == cfg.network_id && e.verify_signature() {
+            if e.network_id == cfg.network_id && e.op.ts() <= ceiling && e.verify_signature() {
                 valid.insert(e.id(), e);
             }
         }
@@ -186,8 +199,13 @@ impl Roster {
         ordered.sort_by(|a, b| a.op.ts().cmp(&b.op.ts()).then_with(|| a.id().cmp(&b.id())));
 
         // 3. Fold, applying authorization at each step against the state so far.
+        //    `admitted_ts` records when each member was admitted, so a member can't
+        //    sign an Add backdated to *before it joined* (a cheap ordering defense;
+        //    see the note on `MAX_FUTURE_SKEW_MS` for the residual).
         let mut roster = Roster::default();
+        let mut admitted_ts: BTreeMap<Id, u64> = BTreeMap::new();
         for e in ordered {
+            let ts = e.op.ts();
             match &e.op {
                 Op::Freeze { frozen, .. } => {
                     if e.signer == cfg.originator_id {
@@ -197,6 +215,7 @@ impl Roster {
                 Op::Remove { node_id, .. } => {
                     if e.signer == cfg.originator_id {
                         roster.members.remove(node_id);
+                        admitted_ts.remove(node_id);
                     }
                 }
                 Op::Add {
@@ -207,8 +226,12 @@ impl Roster {
                     if roster.frozen {
                         continue;
                     }
+                    // The originator may always vouch; a member may vouch only while
+                    // it's a current member and not with a timestamp earlier than its
+                    // own admission.
                     let authorized = e.signer == cfg.originator_id
-                        || roster.members.contains_key(&e.signer);
+                        || (roster.members.contains_key(&e.signer)
+                            && admitted_ts.get(&e.signer).is_some_and(|t| ts >= *t));
                     if authorized {
                         roster.members.insert(
                             *node_id,
@@ -218,6 +241,7 @@ impl Roster {
                                 added_by: e.signer,
                             },
                         );
+                        admitted_ts.insert(*node_id, ts);
                     }
                 }
             }
@@ -609,5 +633,50 @@ mod tests {
             r.member(&id(&b)).unwrap().virtual_ip,
             "concurrently-approved members must not share an IP"
         );
+    }
+
+    #[test]
+    fn far_future_timestamps_are_dropped() {
+        let (cfg, om, devo, _base) = setup();
+        // An otherwise-valid genesis add, but dated far beyond the skew ceiling.
+        let future = sign(
+            cfg.network_id,
+            &om,
+            Op::Add {
+                node_id: id(&devo),
+                hostname: "x".into(),
+                ts: now_ms() + 48 * 60 * 60 * 1000, // +48h
+            },
+        );
+        let r = Roster::build(&cfg, std::slice::from_ref(&future));
+        assert!(r.is_empty(), "far-future entry must be dropped");
+    }
+
+    #[test]
+    fn member_cannot_vouch_before_it_joined() {
+        let (cfg, _om, devo, mut entries) = setup(); // devo admitted at ts=1
+        let laptop = key(3);
+        entries.push(sign(
+            cfg.network_id,
+            &devo,
+            Op::Add { node_id: id(&laptop), hostname: "l".into(), ts: 5 }, // laptop joins at 5
+        ));
+        let early = key(8);
+        let late = key(9);
+        // laptop vouches `early` with a ts BEFORE its own admission -> rejected.
+        entries.push(sign(
+            cfg.network_id,
+            &laptop,
+            Op::Add { node_id: id(&early), hostname: "e".into(), ts: 3 },
+        ));
+        // ...and `late` with a ts after its admission -> accepted.
+        entries.push(sign(
+            cfg.network_id,
+            &laptop,
+            Op::Add { node_id: id(&late), hostname: "L".into(), ts: 6 },
+        ));
+        let r = Roster::build(&cfg, &entries);
+        assert!(!r.is_member(&id(&early)), "backdated vouch (before voucher joined) rejected");
+        assert!(r.is_member(&id(&late)), "valid vouch accepted");
     }
 }

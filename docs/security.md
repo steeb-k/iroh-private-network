@@ -32,6 +32,16 @@ device can still scribble entries into the shared document, but its signature is
 of a current member, so every node — including its own — ignores them. (The
 `removed_member_cannot_forge` test proves this even over real replication.)
 
+## Roster ordering and timestamps
+Entries carry a member-chosen timestamp used only to order a concurrent set, with the content
+hash as a tiebreak. Timestamps are a hint, not a trust anchor, so the fold hardens against
+manipulation: entries dated implausibly far in the future are dropped, and a member cannot sign
+an `Add` backdated to before its own admission. One residual remains — a current (trusted) member
+could backdate an `Add` into a past *unfrozen* window to slip a device past a freeze; fully
+closing that needs causal ordering (a hash-linked DAG / version vectors) and is deferred. The
+backstop is that the attacker is already a trusted member and the originator can remove the
+device or rotate the secret.
+
 ## Taking access away
 - **Remove a member** — the originator signs a `Remove`. It propagates to connected peers; each
   node rebuilds the roster, drops the device from routing, and tears down any live connection to
