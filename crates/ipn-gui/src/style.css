@@ -1,0 +1,31 @@
+/* Base styling for all platforms. Borrowed from seed-sync-gtk.
+ *
+ * Frameless look: merge the header bar into the window background so the app
+ * reads as one solid surface; the content sits in contrasting boxed-list cards
+ * (libadwaita's `.boxed-list` / PreferencesGroup), which is what gives the
+ * card-on-contrast appearance in both light and dark themes. */
+
+headerbar {
+  background-color: @window_bg_color;
+  box-shadow: none;
+}
+
+/* Online/offline dot in the member list (enlarged as an easy hover target;
+ * color comes from libadwaita's .success / .dim-label classes). */
+.status-dot {
+  font-size: 1.2em;
+}
+
+/* The editable network name shown at the top of the main screen. */
+.network-name {
+  font-weight: bold;
+}
+
+/* Empty-state status page: a touch larger, tighter spacing so it fits without a
+ * scrollbar. */
+.empty-state .description {
+  font-size: 1.2em;
+}
+.empty-state .icon {
+  margin-bottom: 12px;
+}

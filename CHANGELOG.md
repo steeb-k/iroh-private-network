@@ -5,6 +5,14 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Changed
+- **GUI redesigned (SEED-style).** A static "IPN / Iroh Private Network" titlebar; a stylesheet
+  borrowed from seed-sync-gtk (frameless header that merges into the window background, with a
+  Windows-11 layer — Segoe UI, accent, rounded controls, native-style window buttons). The main
+  screen shows the **editable network name** (inline pencil), a This-device card, and section rows
+  that open slide-in **flyouts** (Diagnostics, Show join ticket, Administration) — no three-dot
+  menu. **Members are a separate list at the bottom**; clicking a member opens a **detail flyout**
+  (full info + copy + the kick button). The join ticket is no longer auto-shown on create — view
+  it anytime via "Show join ticket".
 - **Hostname is now the live OS hostname.** The name shown for a device is re-read from the OS on
   every presence heartbeat (and for the local device on every status), so it always reflects the
   *actual current* hostname and is never user-editable — it's the source of truth.

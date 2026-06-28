@@ -1,0 +1,76 @@
+/* Windows 11-leaning overrides (layered on top of style.css on Windows only).
+ * Borrowed from seed-sync-gtk: Segoe UI, the Windows accent blue, rounder
+ * controls, and Win11-style window-control buttons.
+ *
+ * GTK4 on Windows has no desktop font / text-scaling setting to read, so the
+ * default UI font renders smaller than on Linux. libadwaita sizes controls
+ * relative to the font, so bumping the base size scales the whole UI to match. */
+window,
+popover,
+tooltip {
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 11pt;
+}
+
+/* Windows 11 default accent (blue). Redefining libadwaita's named colors at
+ * application priority recolors accents, switches, progress, etc. */
+@define-color accent_color #005fb8;
+@define-color accent_bg_color #005fb8;
+@define-color accent_fg_color #ffffff;
+
+button {
+  border-radius: 6px;
+}
+
+entry,
+.boxed-list {
+  border-radius: 8px;
+}
+
+/* Compact the title bar so the controls aren't floating in a tall Adwaita bar. */
+headerbar {
+  min-height: 0;
+  padding: 0;
+}
+
+/* Window control buttons: Windows 11 style — rectangular, flush to the frame,
+ * subtle hover, red close. */
+windowcontrols button {
+  border-radius: 0;
+  min-width: 0;
+  min-height: 0;
+  margin: -5px;
+  padding: 0 13px;
+  background-color: transparent;
+  box-shadow: none;
+}
+
+windowcontrols button:hover {
+  background-color: alpha(@window_fg_color, 0.09);
+}
+
+windowcontrols button image {
+  background: none;
+  background-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Round only the close button's top-right corner to match the window corner. */
+windowcontrols button.close {
+  border-top-right-radius: 8px;
+}
+
+windowcontrols button.close:hover {
+  background-color: #c42b1c;
+  color: #ffffff;
+}
+
+windowcontrols button.close:hover image {
+  color: #ffffff;
+}
+
+windowcontrols button.close:active {
+  background-color: #b0271a;
+  color: #ffffff;
+}
