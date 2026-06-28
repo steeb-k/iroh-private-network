@@ -38,13 +38,17 @@ use crate::network::{generate_originator_key, NetworkSecret, Ticket};
 use crate::node::IrohNode;
 use crate::presence::{Presence, PresenceTracker};
 use crate::roster::{now_ms, sign, Config, Id, Op, Roster};
-use crate::router::{dst_ipv4, RouteTable};
+use crate::router::{clamp_tcp_mss, dst_ipv4, RouteTable};
 use crate::tun_device::RealTun;
 
 /// TUN MTU: clamped well under the QUIC datagram limit (~1200–1400B after
 /// overhead) so one IP packet always fits one datagram. Inner TCP (RDP/SSH)
 /// adapts via PMTU.
 const TUN_MTU: u16 = 1280;
+
+/// TCP MSS we clamp SYNs to (`MTU - IPv4(20) - TCP(20)`), so TCP flows never
+/// exceed the tunnel and get black-holed.
+const TUN_MSS: u16 = TUN_MTU - 40;
 
 const MESH_ALPN: &[u8] = b"ipn/mesh/0";
 const JOIN_ALPN: &[u8] = b"ipn/join/0";
@@ -1087,6 +1091,9 @@ async fn register_mesh(inner: &Arc<Inner>, peer: Id, conn: Connection) {
                     Ok(pkt) => {
                         let tun = inner.tun.read().unwrap().clone();
                         if let Some(tun) = tun {
+                            // Clamp inbound TCP SYNs too (bounds the other direction).
+                            let mut pkt = pkt.to_vec();
+                            clamp_tcp_mss(&mut pkt, TUN_MSS);
                             let _ = tun.send(&pkt).await;
                         }
                     }
@@ -1132,13 +1139,17 @@ async fn enable_tun(inner: &Arc<Inner>, ip: Ipv4Addr) {
                 loop {
                     match tun.recv(&mut buf).await {
                         Ok(n) => {
-                            let pkt = &buf[..n];
+                            let pkt = &mut buf[..n];
                             let Some(dst) = dst_ipv4(pkt) else { continue };
+                            // Clamp TCP MSS so flows stay within the tunnel.
+                            clamp_tcp_mss(pkt, TUN_MSS);
                             let peer = inner2.routes.read().unwrap().lookup(&dst);
                             let Some(peer) = peer else { continue };
                             let conn = inner2.conns.read().unwrap().get(&peer).cloned();
                             if let Some(conn) = conn {
-                                let _ = conn.send_datagram(Bytes::copy_from_slice(pkt));
+                                if let Err(e) = conn.send_datagram(Bytes::copy_from_slice(pkt)) {
+                                    tracing::trace!("dropped {}-byte packet: {e}", pkt.len());
+                                }
                             }
                         }
                         Err(e) => {

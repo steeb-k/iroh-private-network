@@ -5,6 +5,9 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Fixed
+- **TCP MSS clamping.** TCP SYNs (both directions) are clamped to the tunnel's MSS so flows like
+  RDP/SSH/file copy never produce segments too big for a QUIC datagram (which were silently
+  dropped); oversized drops are now logged. Unit tests cover the clamp + checksum recompute.
 - **Protocol version negotiation.** The member mesh/join handshake exchanges a protocol version
   and rejects a mismatch with a clear, mutual error instead of a confusing connection failure;
   the GUI also version-checks the daemon over IPC and shows a "version mismatch" page. New

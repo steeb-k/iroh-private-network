@@ -19,7 +19,8 @@ the membership list is a small signed document every member replicates.
   members can be handed the same address, even on simultaneous approvals). A **TUN interface**
   turns that into a real network device: outbound IP packets are matched to the destination
   member and sent as QUIC datagrams; inbound datagrams are written back to the TUN. The MTU is
-  clamped (1280) so each packet fits a single datagram. That's why ordinary RDP/SSH/etc. clients
+  clamped (1280) and TCP **MSS clamping** is applied to SYNs (both directions) so TCP flows never
+  produce segments too large for a datagram. That's why ordinary RDP/SSH/etc. clients
   work unchanged — to them it's just another network.
 
 ## Network identity

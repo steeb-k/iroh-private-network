@@ -35,9 +35,11 @@ Legend: **★ recommended next** · ⚠️ known gap/risk in the current code ·
 - ⚠️ **Doc can be spammed.** Any holder of the network secret can append entries to the iroh-docs
   replica; a malicious member could bloat it. Consider roster compaction/snapshots, entry caps,
   and pruning superseded entries. (Rotate is the blunt reset.)
-- ⚠️ **Oversized packets are dropped.** Datagrams above the negotiated max are dropped (we clamp
-  TUN MTU to 1280 and rely on PMTUD). Consider TCP MSS clamping, or stream fallback for large
-  packets, and verify behavior with real workloads.
+- ✅ **Oversized packets — addressed via TCP MSS clamping.** TCP SYNs (both directions) have
+  their MSS clamped to `MTU-40` (`router::clamp_tcp_mss`), so TCP flows (RDP/SSH/file copy) never
+  exceed the tunnel and get black-holed; oversized-datagram drops are now logged, not silent.
+  Unit tests cover the clamp + checksum. (Residual: non-TCP jumbo/UDP relies on the TUN MTU and
+  PMTUD; if ever needed, add ICMP "frag-needed" emission for clean PMTUD.)
 - ✅ **Protocol version negotiation — FIXED.** The mesh/join handshake exchanges
   `admission::PROTOCOL_VERSION` in-band and rejects a mismatch with a clear error on both ends
   (the rejecting side finishes the stream + lingers so the peer reads it, not a bare "connection
