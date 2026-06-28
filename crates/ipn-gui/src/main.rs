@@ -290,6 +290,10 @@ fn build_ui(
     header.pack_start(&add_btn);
     header.pack_end(&menu_btn);
 
+    // Title reflects the current network + connection state (updated on each event).
+    let win_title = adw::WindowTitle::new("iroh-private-network", "connecting…");
+    header.set_title_widget(Some(&win_title));
+
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
 
@@ -340,6 +344,7 @@ fn build_ui(
         let state = state.clone();
         let pending = pending.clone();
         let app_n = app.clone();
+        let win_title = win_title.clone();
         glib::spawn_future_local(async move {
             while let Ok(msg) = rx.recv().await {
                 match msg {
@@ -349,11 +354,19 @@ fn build_ui(
                         pending
                             .borrow_mut()
                             .retain(|p| !s.members.iter().any(|m| m.node_id == p.node_id));
+                        let others = s.members.iter().filter(|m| !m.is_self).count();
+                        win_title.set_title(&s.name);
+                        win_title.set_subtitle(&format!(
+                            "{others} device(s) · {}",
+                            if s.online { "connected" } else { "disconnected" }
+                        ));
                         *state.borrow_mut() = Some(s.clone());
                         render_status(&content, &s, &net, &window, &pending);
                     }
                     UiMsg::Status(None) => {
                         *state.borrow_mut() = None;
+                        win_title.set_title("iroh-private-network");
+                        win_title.set_subtitle("no network");
                         render_empty(&content, &net, &window)
                     }
                     UiMsg::Refresh => {
@@ -363,10 +376,12 @@ fn build_ui(
                     }
                     UiMsg::DaemonDown => {
                         *state.borrow_mut() = None;
+                        win_title.set_subtitle("service offline");
                         render_daemon_down(&content)
                     }
                     UiMsg::VersionMismatch { daemon, gui } => {
                         *state.borrow_mut() = None;
+                        win_title.set_subtitle("version mismatch");
                         render_version_mismatch(&content, daemon, gui)
                     }
                     UiMsg::Ticket(t) => show_ticket(&window, &net, &t),
@@ -420,7 +435,18 @@ fn build_ui(
 
     // --- system tray + minimize-to-tray ---
     let (quit_tx, quit_rx) = async_channel::unbounded::<()>();
-    tray::install(app, &window, quit_tx);
+    tray::install(app, &window, quit_tx.clone());
+
+    // Ctrl+Q → Quit IPN (disconnect + exit), same as the tray's "Quit IPN".
+    {
+        let action = gtk::gio::SimpleAction::new("quit", None);
+        let qtx = quit_tx.clone();
+        action.connect_activate(move |_, _| {
+            let _ = qtx.try_send(());
+        });
+        app.add_action(&action);
+        app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
+    }
 
     // Closing the window hides it to the tray (keeps the connection) and, the first
     // time, notifies the user it's still running.

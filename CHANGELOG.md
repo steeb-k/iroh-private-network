@@ -36,6 +36,9 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   address. New `roster` unit tests cover determinism and the concurrent case.
 
 ### Added
+- **Header shows the network + state.** The title bar now displays the current network name and a
+  "N device(s) · connected/disconnected" subtitle (or the offline/mismatch state).
+- **Ctrl+Q** quits IPN (disconnect + exit), same as the tray's "Quit IPN".
 - **Friendlier first-run.** The empty screen now has **Create / Join buttons** right on it (no
   hunting for the + menu), and a **"Connecting…"** placeholder shows until the first status
   arrives.
