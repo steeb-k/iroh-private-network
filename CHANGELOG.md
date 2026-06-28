@@ -13,6 +13,10 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   on-disk secrets are not migrated.
 
 ### Fixed
+- **Roster-doc spam safeguard (partial).** Folding the roster now ignores non-`e/` keys, skips
+  oversized entry values, and caps how many entries it processes, so a member spamming the shared
+  doc can't OOM/peg others. (Bounding on-disk growth needs originator snapshot/prune compaction —
+  tracked in TODO; rotate/remove is the backstop.)
 - **TCP MSS clamping.** TCP SYNs (both directions) are clamped to the tunnel's MSS so flows like
   RDP/SSH/file copy never produce segments too big for a QUIC datagram (which were silently
   dropped); oversized drops are now logged. Unit tests cover the clamp + checksum recompute.

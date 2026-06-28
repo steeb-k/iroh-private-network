@@ -39,13 +39,28 @@ pub async fn publish_entry(doc: &Doc, author: AuthorId, entry: &Entry) -> Result
 /// Read every roster entry currently in the document whose blob content is
 /// available locally. Malformed entries and not-yet-synced blobs are skipped —
 /// a hostile or partial writer can't break the read.
+///
+/// As a DoS safeguard (any member holds the doc write-cap and could append junk),
+/// we only consider entries under our `e/` prefix, skip oversized values, and cap
+/// how many we fold so a spammed replica can't peg CPU/memory. (Bounding the
+/// *on-disk* growth a malicious member can cause needs originator compaction or a
+/// rotate — see TODO.)
+const MAX_ENTRIES: usize = 50_000;
+const MAX_ENTRY_BYTES: u64 = 4096; // our entries are ~200B; anything large is junk
+
 pub async fn load_entries(doc: &Doc, blobs: &Blobs) -> Result<Vec<Entry>> {
     let mut out = Vec::new();
+    let mut seen = 0usize;
     let mut stream = std::pin::pin!(doc.get_many(Query::all()).await?);
     while let Some(entry) = stream.next().await {
         let entry = entry?;
-        if !entry.key().starts_with(KEY_PREFIX) {
+        if !entry.key().starts_with(KEY_PREFIX) || entry.content_len() > MAX_ENTRY_BYTES {
             continue;
+        }
+        seen += 1;
+        if seen > MAX_ENTRIES {
+            tracing::warn!("roster doc has >{MAX_ENTRIES} entries; truncating (possible spam)");
+            break;
         }
         let Ok(bytes) = blobs.get_bytes(entry.content_hash()).await else {
             continue; // blob not synced to this node yet

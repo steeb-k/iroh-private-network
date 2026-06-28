@@ -33,9 +33,13 @@ Legend: **★ recommended next** · ⚠️ known gap/risk in the current code ·
   past *unfrozen* window to slip a device past a freeze. Fully closing it needs causal ordering
   (hash-linked DAG / version vectors) — bigger change, deferred; originator remove/rotate is the
   backstop. (Honest clock skew between members is the benign version of the same thing.)
-- ⚠️ **Doc can be spammed.** Any holder of the network secret can append entries to the iroh-docs
-  replica; a malicious member could bloat it. Consider roster compaction/snapshots, entry caps,
-  and pruning superseded entries. (Rotate is the blunt reset.)
+- 🟡 **Doc can be spammed — partially mitigated.** Done: the fold only considers `e/`-prefixed
+  entries, skips oversized values (`MAX_ENTRY_BYTES`), and caps how many it folds
+  (`MAX_ENTRIES`), so a spammed replica can't OOM/peg a member. **Residual:** a malicious member
+  (who holds the doc write-cap) can still grow the on-disk replica. Fully bounding that needs
+  **originator-signed roster snapshots + pruning** of subsumed entries (a real model change),
+  deferred; **rotate** (fresh namespace) is the backstop, and the originator can **remove** the
+  offender.
 - ✅ **Oversized packets — addressed via TCP MSS clamping.** TCP SYNs (both directions) have
   their MSS clamped to `MTU-40` (`router::clamp_tcp_mss`), so TCP flows (RDP/SSH/file copy) never
   exceed the tunnel and get black-holed; oversized-datagram drops are now logged, not silent.

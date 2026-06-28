@@ -41,6 +41,14 @@ unavailable the daemon errors clearly rather than regenerating identity (which w
 evict the device). `network.cbor` holds only non-secret fields (name, subnet, originator pubkey).
 This assumes one daemon instance per machine/user account.
 
+## Shared-doc abuse
+Every member holds the iroh-docs write capability (that's what enables web-of-trust adds), so a
+malicious member could append junk to the replica. Reading is bounded — only `e/` entries, small
+values, and a capped count are folded — so spam can't OOM or peg a member. Bounding the *on-disk*
+growth a member can cause is not fully solved (it needs originator-signed snapshots + pruning, a
+deferred change); the practical responses are to **remove** the offender or **rotate** the secret
+(which abandons the spammed namespace for a fresh one).
+
 ## Roster ordering and timestamps
 Entries carry a member-chosen timestamp used only to order a concurrent set, with the content
 hash as a tiebreak. Timestamps are a hint, not a trust anchor, so the fold hardens against
