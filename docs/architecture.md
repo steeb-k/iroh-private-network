@@ -11,7 +11,9 @@ the membership list is a small signed document every member replicates.
 - Members form a **full mesh** of authenticated connections. iroh does NAT hole-punching for
   direct links and falls back to a relay only when a direct path can't be established. (n0 runs
   free public relays; self-hosting is on the roadmap.)
-- Each member is assigned a stable virtual IP on a `10.99.0.0/24` subnet. A **TUN interface**
+- Each member's virtual IP on the `10.99.0.0/24` subnet is **derived deterministically from its
+  NodeId** during the roster fold (so every node computes the same collision-free map and no two
+  members can be handed the same address, even on simultaneous approvals). A **TUN interface**
   turns that into a real network device: outbound IP packets are matched to the destination
   member and sent as QUIC datagrams; inbound datagrams are written back to the TUN. The MTU is
   clamped (1280) so each packet fits a single datagram. That's why ordinary RDP/SSH/etc. clients

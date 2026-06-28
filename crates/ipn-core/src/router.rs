@@ -112,23 +112,23 @@ mod tests {
         let cfg = Config {
             network_id: net,
             originator_id: om.verifying_key().to_bytes(),
+            subnet: Ipv4Addr::new(10, 99, 0, 0),
         };
+        let devo_id = devo.verifying_key().to_bytes();
         let entries = vec![sign(
             net,
             &om,
             Op::Add {
-                node_id: devo.verifying_key().to_bytes(),
+                node_id: devo_id,
                 hostname: "o".into(),
-                virtual_ip: Ipv4Addr::new(10, 99, 0, 2),
                 ts: 1,
             },
         )];
         let roster = Roster::build(&cfg, &entries);
+        // The member's IP is assigned by the roster; the table maps it to the node.
+        let ip = roster.member(&devo_id).unwrap().virtual_ip;
         let table = RouteTable::from_roster(&roster);
-        assert_eq!(
-            table.lookup(&Ipv4Addr::new(10, 99, 0, 2)),
-            Some(devo.verifying_key().to_bytes())
-        );
-        assert_eq!(table.lookup(&Ipv4Addr::new(10, 99, 0, 9)), None);
+        assert_eq!(table.lookup(&ip), Some(devo_id));
+        assert_eq!(table.lookup(&Ipv4Addr::new(10, 99, 0, 200)), None);
     }
 }

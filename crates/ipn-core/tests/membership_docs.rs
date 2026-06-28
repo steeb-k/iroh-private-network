@@ -71,9 +71,6 @@ fn key(seed: u8) -> SigningKey {
 fn id(k: &SigningKey) -> [u8; 32] {
     k.verifying_key().to_bytes()
 }
-fn ip(last: u8) -> std::net::Ipv4Addr {
-    std::net::Ipv4Addr::new(10, 99, 0, last)
-}
 
 #[tokio::test]
 #[ignore = "opens real iroh endpoints; run with --ignored"]
@@ -89,6 +86,7 @@ async fn removed_member_cannot_forge_over_docs() -> Result<()> {
     let cfg = Config {
         network_id: NET,
         originator_id: id(&om),
+        subnet: std::net::Ipv4Addr::new(10, 99, 0, 0),
     };
 
     // --- A authors the membership document ---
@@ -106,7 +104,6 @@ async fn removed_member_cannot_forge_over_docs() -> Result<()> {
             Op::Add {
                 node_id: id(&dev_a),
                 hostname: "originator-pc".into(),
-                virtual_ip: ip(2),
                 ts: 1,
             },
         ),
@@ -122,7 +119,6 @@ async fn removed_member_cannot_forge_over_docs() -> Result<()> {
             Op::Add {
                 node_id: id(&dev_b),
                 hostname: "b-laptop".into(),
-                virtual_ip: ip(3),
                 ts: 2,
             },
         ),
@@ -167,7 +163,6 @@ async fn removed_member_cannot_forge_over_docs() -> Result<()> {
         Op::Add {
             node_id: id(&backdoor),
             hostname: "backdoor".into(),
-            virtual_ip: ip(7),
             ts: 4,
         },
     );

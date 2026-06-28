@@ -99,6 +99,10 @@ async fn create_join_and_see_each_other() {
     let (sa, sb) = ok;
     assert!(sa.is_originator, "A is the originator");
     assert!(!sb.is_originator, "B is not the originator");
-    assert_eq!(sa.self_ip.as_deref(), Some("10.99.0.1"));
-    assert_eq!(sb.self_ip.as_deref(), Some("10.99.0.2"));
+    // IPs are derived from the NodeId (not fixed .1/.2): both are in the subnet and distinct.
+    let a_ip = sa.self_ip.expect("A has an IP");
+    let b_ip = sb.self_ip.expect("B has an IP");
+    assert!(a_ip.starts_with("10.99.0."), "A IP in subnet: {a_ip}");
+    assert!(b_ip.starts_with("10.99.0."), "B IP in subnet: {b_ip}");
+    assert_ne!(a_ip, b_ip, "members get distinct IPs");
 }

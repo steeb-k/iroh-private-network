@@ -45,11 +45,13 @@ const DOMAIN: &str = "ipn-roster-v1";
 /// entries deterministically; exact wall-clock accuracy is not required.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub enum Op {
-    /// Admit `node_id` as a member (after out-of-band SAS verification).
+    /// Admit `node_id` as a member (after out-of-band SAS verification). The
+    /// member's virtual IP is NOT chosen here — it's derived deterministically
+    /// from the NodeId during [`Roster::build`], so concurrent approvals by
+    /// different members can never assign the same address (see `assign_ips`).
     Add {
         node_id: Id,
         hostname: String,
-        virtual_ip: Ipv4Addr,
         ts: u64,
     },
     /// Revoke a single member. Originator-only.
@@ -144,6 +146,9 @@ pub struct Config {
     /// The originator master public key — the sole authority for removals/freeze
     /// and the bootstrap signer of the first member.
     pub originator_id: Id,
+    /// The virtual subnet (a /24, e.g. `10.99.0.0`). Member IPs are assigned
+    /// deterministically within it during [`Roster::build`].
+    pub subnet: Ipv4Addr,
 }
 
 /// A current member of the network.
@@ -195,10 +200,7 @@ impl Roster {
                     }
                 }
                 Op::Add {
-                    node_id,
-                    hostname,
-                    virtual_ip,
-                    ..
+                    node_id, hostname, ..
                 } => {
                     // No adds while frozen — including by the originator; the
                     // switch must be flipped back first.
@@ -212,7 +214,7 @@ impl Roster {
                             *node_id,
                             Member {
                                 hostname: hostname.clone(),
-                                virtual_ip: *virtual_ip,
+                                virtual_ip: Ipv4Addr::UNSPECIFIED, // assigned below
                                 added_by: e.signer,
                             },
                         );
@@ -220,6 +222,11 @@ impl Roster {
                 }
             }
         }
+        // Assign each member a stable, collision-free virtual IP derived from its
+        // NodeId. This is a pure function of the member SET, so every node computes
+        // the identical mapping and no two members ever share an address — which is
+        // what eliminates the concurrent-approval IP race.
+        assign_ips(&mut roster.members, cfg.subnet);
         roster
     }
 
@@ -246,20 +253,30 @@ impl Roster {
     pub fn frozen(&self) -> bool {
         self.frozen
     }
+}
 
-    /// Lowest unused host address in `subnet` (a /24), for assigning a joiner's
-    /// virtual IP at add-time. Returns `None` if the /24 is full.
-    pub fn next_free_ip(&self, subnet: Ipv4Addr) -> Option<Ipv4Addr> {
-        let base = subnet.octets();
-        let taken: std::collections::BTreeSet<u8> = self
-            .members
-            .values()
-            .filter(|m| m.virtual_ip.octets()[..3] == base[..3])
-            .map(|m| m.virtual_ip.octets()[3])
-            .collect();
-        (2u8..=254).find(|h| !taken.contains(h)).map(|h| {
-            Ipv4Addr::new(base[0], base[1], base[2], h)
-        })
+/// Deterministically assign each member a virtual IP in `subnet` (a /24), keyed
+/// by NodeId so the result is identical on every node and independent of who
+/// approved whom — there is no IP to race over.
+///
+/// Each member's preferred host is `2 + blake3(node_id) mod 253` (hosts 2..=254,
+/// reserving .0/.1/.255). Members are processed in NodeId order; on the rare hash
+/// collision the later (larger) NodeId probes forward to the next free host. So a
+/// device's IP is effectively permanent and only ever moves on an actual collision.
+fn assign_ips(members: &mut BTreeMap<Id, Member>, subnet: Ipv4Addr) {
+    let base = subnet.octets();
+    let mut taken: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
+    // BTreeMap iterates in NodeId order → deterministic probe outcomes.
+    for (id, member) in members.iter_mut() {
+        let h = u32::from_be_bytes([id[0], id[1], id[2], id[3]]);
+        let mut host = (2 + (h % 253)) as u8; // 2..=254
+        let mut tries = 0;
+        while taken.contains(&host) && tries < 253 {
+            host = if host >= 254 { 2 } else { host + 1 };
+            tries += 1;
+        }
+        taken.insert(host);
+        member.virtual_ip = Ipv4Addr::new(base[0], base[1], base[2], host);
     }
 }
 
@@ -281,9 +298,6 @@ mod tests {
     fn id(k: &SigningKey) -> Id {
         k.verifying_key().to_bytes()
     }
-    fn ip(last: u8) -> Ipv4Addr {
-        Ipv4Addr::new(10, 99, 0, last)
-    }
 
     /// Standard setup: originator master key `om`, originator device `devo`
     /// (bootstrapped by the master key as the genesis member).
@@ -294,15 +308,14 @@ mod tests {
         let cfg = Config {
             network_id: net,
             originator_id: id(&om),
+            subnet: Ipv4Addr::new(10, 99, 0, 0),
         };
         let genesis = sign(
             net,
             &om,
             Op::Add {
                 node_id: id(&devo),
-                hostname: "originator-pc".into(),
-                virtual_ip: ip(2),
-                ts: 1,
+                hostname: "originator-pc".into(),                ts: 1,
             },
         );
         (cfg, om, devo, vec![genesis])
@@ -327,9 +340,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&laptop),
-                hostname: "laptop".into(),
-                virtual_ip: ip(3),
-                ts: 2,
+                hostname: "laptop".into(),                ts: 2,
             },
         ));
         let r = Roster::build(&cfg, &entries);
@@ -347,9 +358,7 @@ mod tests {
             &stranger,
             Op::Add {
                 node_id: id(&victim),
-                hostname: "evil".into(),
-                virtual_ip: ip(9),
-                ts: 2,
+                hostname: "evil".into(),                ts: 2,
             },
         ));
         let r = Roster::build(&cfg, &entries);
@@ -366,9 +375,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&laptop),
-                hostname: "laptop".into(),
-                virtual_ip: ip(3),
-                ts: 2,
+                hostname: "laptop".into(),                ts: 2,
             },
         ));
         // A non-originator member tries to remove the laptop -> ignored.
@@ -406,9 +413,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&laptop),
-                hostname: "laptop".into(),
-                virtual_ip: ip(3),
-                ts: 2,
+                hostname: "laptop".into(),                ts: 2,
             },
         ));
         // Originator removes the laptop at ts=3.
@@ -427,9 +432,7 @@ mod tests {
             &laptop,
             Op::Add {
                 node_id: id(&attacker_target),
-                hostname: "backdoor".into(),
-                virtual_ip: ip(7),
-                ts: 4,
+                hostname: "backdoor".into(),                ts: 4,
             },
         ));
         entries.push(sign(
@@ -475,9 +478,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&q),
-                hostname: "q".into(),
-                virtual_ip: ip(4),
-                ts: 4,
+                hostname: "q".into(),                ts: 4,
             },
         ));
         let r = Roster::build(&cfg, &frozen);
@@ -499,9 +500,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&q),
-                hostname: "q".into(),
-                virtual_ip: ip(4),
-                ts: 6,
+                hostname: "q".into(),                ts: 6,
             },
         ));
         let r = Roster::build(&cfg, &thawed);
@@ -517,9 +516,7 @@ mod tests {
             &devo,
             Op::Add {
                 node_id: id(&key(3)),
-                hostname: "x".into(),
-                virtual_ip: ip(3),
-                ts: 2,
+                hostname: "x".into(),                ts: 2,
             },
         );
         bad.signature[0] ^= 0xff; // corrupt
@@ -537,9 +534,7 @@ mod tests {
             &om,
             Op::Add {
                 node_id: id(&devo),
-                hostname: "x".into(),
-                virtual_ip: ip(2),
-                ts: 1,
+                hostname: "x".into(),                ts: 1,
             },
         );
         let r = Roster::build(&cfg, std::slice::from_ref(&foreign));
@@ -547,20 +542,72 @@ mod tests {
     }
 
     #[test]
-    fn next_free_ip_skips_taken() {
-        let (cfg, _om, devo, mut entries) = setup(); // devo at .2
+    fn ips_are_unique_in_subnet_and_deterministic() {
+        let (cfg, _om, devo, base) = setup();
+        let mut entries = base.clone();
+        let members: Vec<SigningKey> = (10u8..20).map(key).collect();
+        for (i, k) in members.iter().enumerate() {
+            entries.push(sign(
+                cfg.network_id,
+                &devo,
+                Op::Add { node_id: id(k), hostname: "m".into(), ts: 2 + i as u64 },
+            ));
+        }
+        let r = Roster::build(&cfg, &entries);
+
+        // Every member gets a distinct host in the /24 (2..=254).
+        let ips: Vec<Ipv4Addr> = r.members().map(|(_, m)| m.virtual_ip).collect();
+        let uniq: std::collections::BTreeSet<_> = ips.iter().collect();
+        assert_eq!(ips.len(), uniq.len(), "all member IPs must be distinct");
+        for a in &ips {
+            assert_eq!(&a.octets()[..3], &[10, 99, 0], "in subnet");
+            assert!((2..=254).contains(&a.octets()[3]), "valid host");
+        }
+
+        // Entry order must not affect the assignment (every node agrees).
+        let mut shuffled = base;
+        for (i, k) in members.iter().enumerate().rev() {
+            shuffled.push(sign(
+                cfg.network_id,
+                &devo,
+                Op::Add { node_id: id(k), hostname: "m".into(), ts: 2 + i as u64 },
+            ));
+        }
+        let r2 = Roster::build(&cfg, &shuffled);
+        for (idk, m) in r.members() {
+            assert_eq!(m.virtual_ip, r2.member(idk).unwrap().virtual_ip, "deterministic");
+        }
+    }
+
+    #[test]
+    fn concurrent_adds_get_distinct_ips() {
+        // The race fix: two members approving two different joiners at the SAME
+        // timestamp still yield distinct IPs (the approver no longer picks the IP
+        // — it's derived from the NodeId during the fold).
+        let (cfg, _om, devo, mut entries) = setup();
         let laptop = key(3);
         entries.push(sign(
             cfg.network_id,
             &devo,
-            Op::Add {
-                node_id: id(&laptop),
-                hostname: "laptop".into(),
-                virtual_ip: ip(3),
-                ts: 2,
-            },
+            Op::Add { node_id: id(&laptop), hostname: "laptop".into(), ts: 2 },
+        ));
+        let a = key(40);
+        let b = key(41);
+        entries.push(sign(
+            cfg.network_id,
+            &devo,
+            Op::Add { node_id: id(&a), hostname: "a".into(), ts: 5 },
+        ));
+        entries.push(sign(
+            cfg.network_id,
+            &laptop,
+            Op::Add { node_id: id(&b), hostname: "b".into(), ts: 5 },
         ));
         let r = Roster::build(&cfg, &entries);
-        assert_eq!(r.next_free_ip(Ipv4Addr::new(10, 99, 0, 0)), Some(ip(4)));
+        assert_ne!(
+            r.member(&id(&a)).unwrap().virtual_ip,
+            r.member(&id(&b)).unwrap().virtual_ip,
+            "concurrently-approved members must not share an IP"
+        );
     }
 }

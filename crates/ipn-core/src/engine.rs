@@ -62,8 +62,6 @@ struct StoredConfig {
     originator_id: Id,
     /// Present only on the originator's device (the exportable master authority).
     originator_secret: Option<[u8; 32]>,
-    /// Our assigned virtual IP (set once admitted).
-    my_ip: Option<[u8; 4]>,
 }
 
 impl StoredConfig {
@@ -74,6 +72,7 @@ impl StoredConfig {
         Config {
             network_id: self.secret().network_id(),
             originator_id: self.originator_id,
+            subnet: self.subnet(),
         }
     }
     fn subnet(&self) -> Ipv4Addr {
@@ -141,7 +140,7 @@ struct JoinRequest {
 
 #[derive(Serialize, Deserialize)]
 enum JoinResponse {
-    Approved { ip: [u8; 4] },
+    Approved,
     Denied,
 }
 
@@ -314,7 +313,6 @@ impl Engine {
         let secret = NetworkSecret::generate();
         let originator = generate_originator_key();
         let originator_id = originator.verifying_key().to_bytes();
-        let my_ip = Ipv4Addr::new(subnet.octets()[0], subnet.octets()[1], subnet.octets()[2], 1);
 
         let cfg = StoredConfig {
             name: name.clone(),
@@ -322,19 +320,18 @@ impl Engine {
             secret: secret.to_bytes(),
             originator_id,
             originator_secret: Some(originator.to_bytes()),
-            my_ip: Some(my_ip.octets()),
         };
         save_config(&self.inner.data_dir, &cfg)?;
         activate(&self.inner, cfg).await?;
 
-        // Genesis entry: originator master key vouches its own device in.
+        // Genesis entry: originator master key vouches its own device in. The IP
+        // is assigned deterministically from the NodeId when the roster is folded.
         let genesis = sign(
             secret.network_id(),
             &originator,
             Op::Add {
                 node_id: self.inner.my_id,
                 hostname: self.inner.hostname.clone(),
-                virtual_ip: my_ip,
                 ts: now_ms(),
             },
         );
@@ -356,14 +353,13 @@ impl Engine {
             }
         }
         let secret = ticket.secret();
-        // Store a provisional config (no IP yet) and open the shared roster doc.
-        let mut cfg = StoredConfig {
+        // Store a provisional config and open the shared roster doc.
+        let cfg = StoredConfig {
             name: ticket.name.clone(),
             subnet: ticket.subnet,
             secret: secret.to_bytes(),
             originator_id: ticket.originator_id,
             originator_secret: None,
-            my_ip: None,
         };
         activate(&self.inner, cfg.clone()).await?;
 
@@ -392,11 +388,12 @@ impl Engine {
         .await?;
         let resp: JoinResponse = read_msg(&mut recv).await.context("read join response")?;
         match resp {
-            JoinResponse::Approved { ip } => {
-                cfg.my_ip = Some(ip);
+            JoinResponse::Approved => {
                 save_config(&self.inner.data_dir, &cfg)?;
                 self.inner.state.lock().await.config = Some(cfg);
-                // Pull the roster from the member who admitted us.
+                // Pull the roster from the member who admitted us. Our virtual IP
+                // is derived from our NodeId once we appear in the synced roster;
+                // the periodic tick then brings up routing.
                 if let Some(doc) = self.inner.state.lock().await.doc.clone() {
                     let _ = doc.start_sync(vec![ticket.bootstrap.clone()]).await;
                 }
@@ -515,7 +512,7 @@ impl Engine {
     /// the normal SAS flow).
     pub async fn rotate_network(&self) -> Result<String> {
         let originator = self.originator_key().await?;
-        let (old_net_id, others, name, subnet, my_ip, originator_id) = {
+        let (old_net_id, others, name, subnet, originator_id) = {
             let st = self.inner.state.lock().await;
             let cfg = st.config.as_ref().context("no network")?;
             let others: Vec<Id> = st
@@ -529,7 +526,6 @@ impl Engine {
                 others,
                 cfg.name.clone(),
                 cfg.subnet(),
-                cfg.my_ip,
                 cfg.originator_id,
             )
         };
@@ -552,30 +548,25 @@ impl Engine {
         // 2. Tear down the old network entirely.
         teardown(&self.inner).await;
 
-        // 3. Start fresh under a new secret, keeping name/subnet/originator/IP.
+        // 3. Start fresh under a new secret, keeping name/subnet/originator.
         let secret = NetworkSecret::generate();
-        let my_ip = my_ip.unwrap_or_else(|| {
-            Ipv4Addr::new(subnet.octets()[0], subnet.octets()[1], subnet.octets()[2], 1).octets()
-        });
         let cfg = StoredConfig {
             name: name.clone(),
             subnet: subnet.octets(),
             secret: secret.to_bytes(),
             originator_id,
             originator_secret: Some(originator.to_bytes()),
-            my_ip: Some(my_ip),
         };
         save_config(&self.inner.data_dir, &cfg)?;
         activate(&self.inner, cfg).await?;
 
-        // Genesis self-add in the NEW namespace.
+        // Genesis self-add in the NEW namespace (IP derived during the fold).
         let genesis = sign(
             secret.network_id(),
             &originator,
             Op::Add {
                 node_id: self.inner.my_id,
                 hostname: self.inner.hostname.clone(),
-                virtual_ip: Ipv4Addr::from(my_ip),
                 ts: now_ms(),
             },
         );
@@ -679,7 +670,10 @@ impl Engine {
             subnet: cfg.subnet().to_string(),
             frozen: st.roster.frozen(),
             self_node_id: data_encoding::HEXLOWER.encode(&self.inner.my_id),
-            self_ip: cfg.my_ip.map(|ip| Ipv4Addr::from(ip).to_string()),
+            self_ip: st
+                .roster
+                .member(&self.inner.my_id)
+                .map(|m| m.virtual_ip.to_string()),
             is_originator: cfg.originator_secret.is_some(),
             routing: self.inner.tun.read().unwrap().is_some(),
             online: st.doc.is_some(),
@@ -833,8 +827,10 @@ async fn tick(inner: &Arc<Inner>) -> Result<()> {
             .record_connection(id, None, None, false);
     }
 
-    // Bring up the TUN once we know our own IP (best-effort; needs elevation).
-    enable_tun(inner, &cfg).await;
+    // Bring up the TUN with our roster-assigned IP (best-effort; needs elevation).
+    if let Some(me) = roster.member(&inner.my_id) {
+        enable_tun(inner, me.virtual_ip).await;
+    }
 
     // Snapshot members to dial + update presence virtual IPs.
     let connected: std::collections::HashSet<Id> =
@@ -983,14 +979,14 @@ async fn handle_join_incoming(inner: Arc<Inner>, conn: Connection) {
     let approved = rx.await.unwrap_or(false);
     let resp = if approved {
         match admit_member(&inner, net_id, verified.peer_id, req.hostname).await {
-            Ok(ip) => {
+            Ok(()) => {
                 // Help the joiner sync the roster from us.
                 if let Some(doc) = inner.state.lock().await.doc.clone() {
                     if let Ok(a) = bootstrap_addr(&verified.peer_id) {
                         let _ = doc.start_sync(vec![a]).await;
                     }
                 }
-                JoinResponse::Approved { ip: ip.octets() }
+                JoinResponse::Approved
             }
             Err(e) => {
                 tracing::warn!("admit failed: {e:#}");
@@ -1010,31 +1006,26 @@ async fn handle_join_incoming(inner: Arc<Inner>, conn: Connection) {
     let _ = conn.closed().await;
 }
 
-/// Assign the joiner an IP and write a signed `Add` (web-of-trust vouch).
-async fn admit_member(inner: &Arc<Inner>, net_id: Id, peer: Id, hostname: String) -> Result<Ipv4Addr> {
-    let (subnet, roster) = {
+/// Write a signed `Add` vouching the joiner in (web-of-trust). The joiner's IP is
+/// derived from its NodeId when the roster is folded, so no IP is chosen here.
+async fn admit_member(inner: &Arc<Inner>, net_id: Id, peer: Id, hostname: String) -> Result<()> {
+    let frozen = {
         let st = inner.state.lock().await;
-        let cfg = st.config.as_ref().context("no network")?;
-        (cfg.subnet(), st.roster.clone())
+        st.roster.frozen()
     };
-    if roster.frozen() {
+    if frozen {
         bail!("roster is frozen");
     }
-    let ip = roster
-        .next_free_ip(subnet)
-        .ok_or_else(|| anyhow!("subnet is full"))?;
     let entry = sign(
         net_id,
         &inner.device_key,
         Op::Add {
             node_id: peer,
             hostname,
-            virtual_ip: ip,
             ts: now_ms(),
         },
     );
-    publish(inner, &entry).await?;
-    Ok(ip)
+    publish(inner, &entry).await
 }
 
 async fn register_mesh(inner: &Arc<Inner>, peer: Id, conn: Connection) {
@@ -1080,7 +1071,7 @@ async fn register_mesh(inner: &Arc<Inner>, peer: Id, conn: Connection) {
 /// Bring up the OS TUN once, if we know our virtual IP. Best-effort: if it fails
 /// (no elevation, missing wintun.dll, …) we log and keep running without routing,
 /// so membership + presence still work. Spawns the outbound read loop on success.
-async fn enable_tun(inner: &Arc<Inner>, cfg: &StoredConfig) {
+async fn enable_tun(inner: &Arc<Inner>, ip: Ipv4Addr) {
     // Escape hatch for tests/CI (and headless runs where a TUN is undesirable).
     if std::env::var_os("IPN_DISABLE_TUN").is_some() {
         return;
@@ -1088,11 +1079,6 @@ async fn enable_tun(inner: &Arc<Inner>, cfg: &StoredConfig) {
     if inner.tun_attempted.swap(true, Ordering::SeqCst) {
         return; // only attempt once
     }
-    let Some(ip) = cfg.my_ip else {
-        inner.tun_attempted.store(false, Ordering::SeqCst); // no IP yet; retry later
-        return;
-    };
-    let ip = Ipv4Addr::from(ip);
     match RealTun::open(ip, 24, TUN_MTU) {
         Ok(tun) => {
             let tun = Arc::new(tun);

@@ -4,6 +4,12 @@ All notable changes to IPN. Format follows [Keep a Changelog](https://keepachang
 Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
+### Fixed
+- **Virtual-IP assignment race.** Member IPs are now derived deterministically from the NodeId
+  during the roster fold (collision-free and identical on every node), instead of being chosen
+  by whoever approves the join — so two simultaneous approvals can no longer assign the same
+  address. New `roster` unit tests cover determinism and the concurrent case.
+
 ### Added
 - **System tray** (Open IPN / Quit IPN) with minimize-to-tray: closing the window hides it to
   the tray (keeps the connection) and notifies once; "Quit IPN" disconnects from the network
