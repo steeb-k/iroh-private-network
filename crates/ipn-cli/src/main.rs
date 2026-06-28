@@ -104,6 +104,7 @@ async fn main() -> Result<()> {
             }
         }
         IpcResponse::Ticket(t) => println!("{t}"),
+        IpcResponse::Hello { version } => println!("daemon ipc protocol v{version}"),
         IpcResponse::Ok => println!("ok"),
         IpcResponse::Err(e) => bail!("daemon error: {e}"),
     }

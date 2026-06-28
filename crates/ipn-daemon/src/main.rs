@@ -223,6 +223,9 @@ async fn handle_request(engine: &Engine, req: IpcRequest) -> IpcResponse {
     use std::net::Ipv4Addr;
     let to_err = |e: anyhow::Error| IpcResponse::Err(format!("{e:#}"));
     match req {
+        IpcRequest::Hello { .. } => IpcResponse::Hello {
+            version: ipn_ipc::PROTO_VERSION,
+        },
         IpcRequest::GetStatus => IpcResponse::Status(engine.status().await.ok()),
         IpcRequest::CreateNetwork { name } => {
             match engine.create_network(name, Ipv4Addr::new(10, 99, 0, 0)).await {

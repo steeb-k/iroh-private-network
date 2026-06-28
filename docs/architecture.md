@@ -8,6 +8,9 @@ the membership list is a small signed document every member replicates.
 - Each device has an **iroh identity**: a NodeId, which is an ed25519 public key. Connections
   are QUIC, end-to-end encrypted, and mutually authenticated by construction — the key *is* the
   identity, so a peer can't be impersonated.
+- Every mesh/join handshake first exchanges a **protocol version**
+  (`admission::PROTOCOL_VERSION`); a mismatch is rejected with a clear error on both ends. The
+  GUI↔daemon IPC is likewise versioned (an `IpcRequest::Hello` check).
 - Members form a **full mesh** of authenticated connections. iroh does NAT hole-punching for
   direct links and falls back to a relay only when a direct path can't be established. (n0 runs
   free public relays; self-hosting is on the roadmap.)

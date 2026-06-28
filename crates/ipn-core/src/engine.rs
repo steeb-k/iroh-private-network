@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock as StdRwLock};
 use std::time::Duration;
 
@@ -204,6 +204,9 @@ struct Inner {
     /// Whether we've ever seen ourselves in the roster. Once true, dropping out of
     /// the roster means we were removed → auto-leave (handles remove/delete/rotate).
     was_member: AtomicBool,
+    /// Our mesh/join protocol version (normally `admission::PROTOCOL_VERSION`;
+    /// overridable in tests to exercise the mismatch path).
+    protocol_version: AtomicU32,
 }
 
 #[derive(Clone)]
@@ -256,6 +259,7 @@ impl Engine {
             tun_attempted: AtomicBool::new(false),
             net_tasks: StdMutex::new(Vec::new()),
             was_member: AtomicBool::new(false),
+            protocol_version: AtomicU32::new(admission::PROTOCOL_VERSION),
         });
 
         // Accept loops for our custom ALPNs.
@@ -295,6 +299,12 @@ impl Engine {
     /// connections remain after a member is removed or the network is deleted).
     pub fn live_connection_count(&self) -> usize {
         self.inner.conns.read().unwrap().len()
+    }
+
+    /// Override this device's mesh/join protocol version (test hook for the
+    /// version-mismatch path). In production it stays `admission::PROTOCOL_VERSION`.
+    pub fn set_protocol_version(&self, v: u32) {
+        self.inner.protocol_version.store(v, Ordering::SeqCst);
     }
 
     pub async fn has_network(&self) -> bool {
@@ -372,7 +382,13 @@ impl Engine {
             .await
             .context("dial bootstrap member")?;
         let psk = secret.psk();
-        let verified = admission::dial(&conn, self.inner.my_id, &psk).await?;
+        let verified = admission::dial(
+            &conn,
+            self.inner.my_id,
+            &psk,
+            self.inner.protocol_version.load(Ordering::SeqCst),
+        )
+        .await?;
         let _ = self.inner.events.send(EngineEvent::JoinSas {
             sas: verified.sas.iter().map(|s| s.to_string()).collect(),
         });
@@ -906,7 +922,13 @@ async fn dial_member(inner: &Arc<Inner>, peer: Id, psk: [u8; 32]) -> Result<()> 
         Vec::<TransportAddr>::new(),
     );
     let conn = inner.node.endpoint.connect(addr, MESH_ALPN).await?;
-    let _verified = admission::dial(&conn, inner.my_id, &psk).await?;
+    let _verified = admission::dial(
+        &conn,
+        inner.my_id,
+        &psk,
+        inner.protocol_version.load(Ordering::SeqCst),
+    )
+    .await?;
     register_mesh(inner, peer, conn).await;
     Ok(())
 }
@@ -916,10 +938,20 @@ async fn handle_mesh_incoming(inner: Arc<Inner>, conn: Connection) {
         Some(p) => p,
         None => return,
     };
-    let peer = match admission::accept(&conn, inner.my_id, &psk).await {
+    let peer = match admission::accept(
+        &conn,
+        inner.my_id,
+        &psk,
+        inner.protocol_version.load(Ordering::SeqCst),
+    )
+    .await
+    {
         Ok(v) => v.peer_id,
         Err(e) => {
             tracing::debug!("mesh handshake failed: {e:#}");
+            // Linger briefly so a rejected peer (e.g. version mismatch) can read
+            // our finished handshake frame and surface a clear error.
+            tokio::time::sleep(Duration::from_millis(300)).await;
             return;
         }
     };
@@ -942,10 +974,18 @@ async fn handle_join_incoming(inner: Arc<Inner>, conn: Connection) {
             None => return,
         }
     };
-    let verified = match admission::accept(&conn, inner.my_id, &psk).await {
+    let verified = match admission::accept(
+        &conn,
+        inner.my_id,
+        &psk,
+        inner.protocol_version.load(Ordering::SeqCst),
+    )
+    .await
+    {
         Ok(v) => v,
         Err(e) => {
             tracing::debug!("join handshake failed: {e:#}");
+            tokio::time::sleep(Duration::from_millis(300)).await;
             return;
         }
     };

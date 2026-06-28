@@ -32,6 +32,7 @@ enum UiMsg {
     },
     Toast(String),
     DaemonDown,
+    VersionMismatch { daemon: u32, gui: u32 },
 }
 
 /// Everything needed to fire IPC requests off the GTK thread.
@@ -75,6 +76,37 @@ impl Net {
 async fn stream_events(socket: &std::path::Path, tx: &async_channel::Sender<UiMsg>) -> std::io::Result<()> {
     let stream = transport::connect(socket).await?;
     let (mut reader, mut writer) = tokio::io::split(stream);
+
+    // Version handshake first: a GUI/daemon mismatch is surfaced clearly instead
+    // of failing on an unknown message later.
+    write_frame(
+        &mut writer,
+        &Frame {
+            id: 2,
+            body: Message::Request(IpcRequest::Hello {
+                version: ipn_ipc::PROTO_VERSION,
+            }),
+        },
+    )
+    .await?;
+    loop {
+        let Some(frame) = read_frame(&mut reader).await? else {
+            return Ok(());
+        };
+        if let Message::Response(IpcResponse::Hello { version }) = frame.body {
+            if version != ipn_ipc::PROTO_VERSION {
+                let _ = tx
+                    .send(UiMsg::VersionMismatch {
+                        daemon: version,
+                        gui: ipn_ipc::PROTO_VERSION,
+                    })
+                    .await;
+                return Ok(());
+            }
+            break;
+        }
+    }
+
     write_frame(
         &mut writer,
         &Frame {
@@ -207,6 +239,9 @@ fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>
                     UiMsg::Status(Some(s)) => render_status(&content, &s, &net, &window),
                     UiMsg::Status(None) => render_empty(&content),
                     UiMsg::DaemonDown => render_daemon_down(&content),
+                    UiMsg::VersionMismatch { daemon, gui } => {
+                        render_version_mismatch(&content, daemon, gui)
+                    }
                     UiMsg::Ticket(t) => show_ticket(&window, &t),
                     UiMsg::JoinSas(sas) => show_join_sas(&window, &sas),
                     UiMsg::JoinRequest {
@@ -285,6 +320,20 @@ fn render_daemon_down(content: &gtk::Box) {
             "The privileged ipn-daemon isn't reachable. Start it (Windows: the IPN service; \
              Linux: `sudo ipn-daemon` or the systemd service). This window reconnects automatically.",
         )
+        .vexpand(true)
+        .build();
+    content.append(&status);
+}
+
+fn render_version_mismatch(content: &gtk::Box, daemon: u32, gui: u32) {
+    clear_box(content);
+    let status = adw::StatusPage::builder()
+        .icon_name("dialog-warning-symbolic")
+        .title("Version mismatch")
+        .description(format!(
+            "The app (IPC v{gui}) and the background service (IPC v{daemon}) are different \
+             versions. Update both IPN components to the same release."
+        ))
         .vexpand(true)
         .build();
     content.append(&status);

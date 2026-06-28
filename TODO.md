@@ -38,9 +38,11 @@ Legend: **★ recommended next** · ⚠️ known gap/risk in the current code ·
 - ⚠️ **Oversized packets are dropped.** Datagrams above the negotiated max are dropped (we clamp
   TUN MTU to 1280 and rely on PMTUD). Consider TCP MSS clamping, or stream fallback for large
   packets, and verify behavior with real workloads.
-- ⚠️ **Protocol has no version negotiation.** ALPNs are `ipn/mesh/0` / `ipn/join/0` and the IPC
-  is unversioned. A daemon/GUI or peer-to-peer version mismatch will fail confusingly. Add an
-  explicit protocol version in the handshakes and the IPC hello, with a clear error.
+- ✅ **Protocol version negotiation — FIXED.** The mesh/join handshake exchanges
+  `admission::PROTOCOL_VERSION` in-band and rejects a mismatch with a clear error on both ends
+  (the rejecting side finishes the stream + lingers so the peer reads it, not a bare "connection
+  lost"). The GUI does an `IpcRequest::Hello` version check with the daemon and shows a "version
+  mismatch" page. Covered by `protocol_version_e2e`.
 
 ## Hardening (security)
 - Self-host relay setting (point at your own iroh relay).

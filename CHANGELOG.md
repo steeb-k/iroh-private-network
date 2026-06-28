@@ -5,6 +5,10 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Fixed
+- **Protocol version negotiation.** The member mesh/join handshake exchanges a protocol version
+  and rejects a mismatch with a clear, mutual error instead of a confusing connection failure;
+  the GUI also version-checks the daemon over IPC and shows a "version mismatch" page. New
+  `protocol_version_e2e` smoke test.
 - **Roster timestamp hardening (partial).** Entries dated implausibly far in the future are
   dropped, and a member can't sign an `Add` backdated to before its own admission. (The deeper
   backdate-past-a-freeze case still needs causal ordering — tracked in TODO.)

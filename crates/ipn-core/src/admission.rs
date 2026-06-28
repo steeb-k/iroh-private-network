@@ -27,6 +27,12 @@ type HmacSha256 = Hmac<Sha256>;
 
 const DOMAIN: &[u8] = b"ipn-admission-v1";
 
+/// Wire-protocol version for the member mesh + join handshakes. Exchanged in-band
+/// at the start of every handshake so a version mismatch produces a clear error
+/// (rather than a confusing connection failure). Bump on any incompatible change
+/// to the handshake or data-plane framing.
+pub const PROTOCOL_VERSION: u32 = 1;
+
 /// Outcome of a successful handshake.
 #[derive(Clone, Debug)]
 pub struct Verified {
@@ -38,15 +44,15 @@ pub struct Verified {
 }
 
 /// Run the handshake as the **dialing** side (opens the control stream).
-pub async fn dial(conn: &Connection, my_id: Id, psk: &[u8; 32]) -> Result<Verified> {
+pub async fn dial(conn: &Connection, my_id: Id, psk: &[u8; 32], version: u32) -> Result<Verified> {
     let (mut send, mut recv) = conn.open_bi().await.context("open control stream")?;
-    run(&mut send, &mut recv, my_id, *conn.remote_id().as_bytes(), psk).await
+    run(&mut send, &mut recv, my_id, *conn.remote_id().as_bytes(), psk, version).await
 }
 
 /// Run the handshake as the **accepting** side (accepts the control stream).
-pub async fn accept(conn: &Connection, my_id: Id, psk: &[u8; 32]) -> Result<Verified> {
+pub async fn accept(conn: &Connection, my_id: Id, psk: &[u8; 32], version: u32) -> Result<Verified> {
     let (mut send, mut recv) = conn.accept_bi().await.context("accept control stream")?;
-    run(&mut send, &mut recv, my_id, *conn.remote_id().as_bytes(), psk).await
+    run(&mut send, &mut recv, my_id, *conn.remote_id().as_bytes(), psk, version).await
 }
 
 async fn run(
@@ -55,7 +61,23 @@ async fn run(
     my_id: Id,
     peer_id: Id,
     psk: &[u8; 32],
+    version: u32,
 ) -> Result<Verified> {
+    // 0. Exchange + check the protocol version, for a clear mismatch error.
+    send.write_all(&version.to_be_bytes()).await.context("send version")?;
+    let mut vbuf = [0u8; 4];
+    recv.read_exact(&mut vbuf).await.context("recv version")?;
+    let peer_version = u32::from_be_bytes(vbuf);
+    if peer_version != version {
+        // Finish (not reset) our send so the peer reliably reads our version and
+        // produces the same clear error instead of a bare "connection lost".
+        let _ = send.finish();
+        bail!(
+            "protocol mismatch: peer speaks IPN protocol v{peer_version}, we speak v{version} \
+             — update IPN on one of the devices"
+        );
+    }
+
     // 1. Exchange fresh nonces.
     let mut na = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut na);

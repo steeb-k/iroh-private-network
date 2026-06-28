@@ -14,6 +14,10 @@ pub mod transport;
 /// Display DTOs are reused straight from the engine crate (plain serde structs).
 pub use ipn_core::{MemberView, NetworkStatus};
 
+/// IPC wire-protocol version between the GUI/CLI and the daemon. Bump on any
+/// incompatible change to these request/response/event types.
+pub const PROTO_VERSION: u32 = 1;
+
 /// Where the GUI and daemon rendezvous. On Windows this path is only hashed into
 /// a named-pipe name; on Unix it's the actual socket path (fixed, not `$TMPDIR`,
 /// so a root daemon and a user GUI agree).
@@ -46,6 +50,8 @@ pub enum Message {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcRequest {
+    /// Version handshake; the daemon replies with [`IpcResponse::Hello`].
+    Hello { version: u32 },
     GetStatus,
     CreateNetwork { name: String },
     Join { ticket: String },
@@ -70,6 +76,8 @@ pub enum IpcRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IpcResponse {
+    /// The daemon's IPC protocol version (reply to [`IpcRequest::Hello`]).
+    Hello { version: u32 },
     /// `None` when this device isn't in a network yet.
     Status(Option<NetworkStatus>),
     Ticket(String),
