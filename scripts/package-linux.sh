@@ -30,7 +30,7 @@ mkdir -p "$STAGE/bin" "$STAGE/share/applications" \
          "$STAGE/share/icons/hicolor/256x256/apps"
 
 # App icon, named after the app-id so the .desktop entry + window match it.
-install -m 0644 "$ROOT/img/icon.png" \
+install -m 0644 "$ROOT/img/icon-spin.png" \
   "$STAGE/share/icons/hicolor/256x256/apps/io.github.steeb_k.IPN.png"
 
 # GUI (unprivileged), daemon (owns the TUN), CLI.

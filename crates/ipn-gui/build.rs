@@ -1,5 +1,5 @@
-//! On Windows, embed the app icon (img/icon.ico) into the GUI executable so the
-//! taskbar/window/Explorer icon is IPN's. No-op on other platforms.
+//! On Windows, embed the app icon (img/icon-spin.ico) into the GUI executable so
+//! the taskbar/window/Explorer icon is IPN's. No-op on other platforms.
 
 fn main() {
     #[cfg(windows)]
@@ -8,7 +8,7 @@ fn main() {
 
 #[cfg(windows)]
 fn embed_windows_icon() {
-    let ico = concat!(env!("CARGO_MANIFEST_DIR"), "/../../img/icon.ico");
+    let ico = concat!(env!("CARGO_MANIFEST_DIR"), "/../../img/icon-spin.ico");
     if std::path::Path::new(ico).exists() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon(ico);
@@ -16,7 +16,7 @@ fn embed_windows_icon() {
             println!("cargo:warning=could not embed Windows icon: {e}");
         }
     } else {
-        println!("cargo:warning=img/icon.ico not found; skipping Windows icon embed");
+        println!("cargo:warning=img/icon-spin.ico not found; skipping Windows icon embed");
     }
-    println!("cargo:rerun-if-changed=../../img/icon.ico");
+    println!("cargo:rerun-if-changed=../../img/icon-spin.ico");
 }

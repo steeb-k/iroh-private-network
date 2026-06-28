@@ -5,6 +5,8 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Changed
+- **New app icon** (`img/icon-spin.*`): embedded in the Windows `.exe` and installed as the Linux
+  hicolor icon. The tray icon is unchanged. (Takes effect on the next build.)
 - **GUI redesigned (SEED-style).** A static "IPN / Iroh Private Network" titlebar; a stylesheet
   borrowed from seed-sync-gtk (frameless header that merges into the window background, with a
   Windows-11 layer — Segoe UI, accent, rounded controls, native-style window buttons). Sub-menus
