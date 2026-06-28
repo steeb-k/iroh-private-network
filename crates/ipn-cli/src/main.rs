@@ -8,7 +8,7 @@ use ipn_ipc::transport::oneshot_request;
 use ipn_ipc::{IpcRequest, IpcResponse};
 
 #[derive(Parser)]
-#[command(name = "ipn-cli", about = "Control the IPN daemon")]
+#[command(name = "ipn-cli", about = "Control the IPN daemon", version)]
 struct Cli {
     #[arg(long)]
     socket: Option<PathBuf>,

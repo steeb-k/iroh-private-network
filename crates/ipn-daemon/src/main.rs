@@ -23,7 +23,7 @@ use tokio::io::AsyncWriteExt;
 mod service;
 
 #[derive(Parser)]
-#[command(name = "ipn-daemon", about = "Privileged IPN daemon (owns TUN + iroh node)")]
+#[command(name = "ipn-daemon", about = "Privileged IPN daemon (owns TUN + iroh node)", version)]
 struct Cli {
     /// Override the data directory (node key, network config, docs).
     #[arg(long)]

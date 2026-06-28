@@ -36,6 +36,11 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   address. New `roster` unit tests cover determinism and the concurrent case.
 
 ### Added
+- **Friendlier first-run.** The empty screen now has **Create / Join buttons** right on it (no
+  hunting for the + menu), and a **"Connecting…"** placeholder shows until the first status
+  arrives.
+- **`--version`** on `ipn`, `ipn-cli`, and `ipn-daemon`; **`--minimized`** (or
+  `IPN_START_MINIMIZED`) launches the GUI straight to the tray, for launch-on-login.
 - **Diagnostics view.** A collapsible "Diagnostics" section on the main screen shows this device's
   home relay, a direct-vs-relay connection summary, and TUN routing state. `NetworkStatus` gained
   `home_relay`.

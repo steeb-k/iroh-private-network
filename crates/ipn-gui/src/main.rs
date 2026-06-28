@@ -191,6 +191,16 @@ fn save_window_size(window: &adw::ApplicationWindow) {
 }
 
 fn main() -> glib::ExitCode {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("ipn {}", env!("CARGO_PKG_VERSION"));
+        return glib::ExitCode::SUCCESS;
+    }
+    // Start hidden in the tray (for launch-on-login). Also honored via env so a
+    // desktop autostart entry can set it without arg quoting.
+    let start_minimized =
+        args.iter().any(|a| a == "--minimized") || std::env::var_os("IPN_START_MINIMIZED").is_some();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
@@ -215,12 +225,17 @@ fn main() -> glib::ExitCode {
     net.subscribe_loop();
 
     let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(move |app| build_ui(app, net.clone(), rx.clone()));
+    app.connect_activate(move |app| build_ui(app, net.clone(), rx.clone(), start_minimized));
     let empty: [&str; 0] = [];
     app.run_with_args(&empty)
 }
 
-fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>) {
+fn build_ui(
+    app: &adw::Application,
+    net: Net,
+    rx: async_channel::Receiver<UiMsg>,
+    start_minimized: bool,
+) {
     let (win_w, win_h) = load_window_size();
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -289,6 +304,9 @@ fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>
     toast_overlay.set_child(Some(&toolbar));
     window.set_content(Some(&toast_overlay));
 
+    // Initial placeholder until the first status/event arrives.
+    render_connecting(&content);
+
     {
         let net = net.clone();
         let window = window.clone();
@@ -336,7 +354,7 @@ fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>
                     }
                     UiMsg::Status(None) => {
                         *state.borrow_mut() = None;
-                        render_empty(&content)
+                        render_empty(&content, &net, &window)
                     }
                     UiMsg::Refresh => {
                         if let Some(s) = state.borrow().as_ref() {
@@ -450,7 +468,12 @@ fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>
         _ => None,
     });
 
-    window.present();
+    if start_minimized {
+        // Launch straight to the tray (for autostart); the tray icon reopens it.
+        window.set_visible(false);
+    } else {
+        window.present();
+    }
 }
 
 fn clear_box(b: &gtk::Box) {
@@ -487,15 +510,54 @@ fn render_version_mismatch(content: &gtk::Box, daemon: u32, gui: u32) {
     content.append(&status);
 }
 
-fn render_empty(content: &gtk::Box) {
+fn render_connecting(content: &gtk::Box) {
     clear_box(content);
+    let spinner = gtk::Spinner::builder()
+        .width_request(32)
+        .height_request(32)
+        .build();
+    spinner.start();
     let status = adw::StatusPage::builder()
-        .icon_name("network-workgroup-symbolic")
-        .title("No network yet")
-        .description("Click + to create a private network, or join one with a ticket.")
+        .title("Connecting…")
+        .description("Reaching the IPN background service.")
+        .child(&spinner)
         .vexpand(true)
         .build();
     content.append(&status);
+}
+
+fn render_empty(content: &gtk::Box, net: &Net, window: &adw::ApplicationWindow) {
+    clear_box(content);
+
+    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk::Align::Center);
+    let create = gtk::Button::with_label("Create a network");
+    create.add_css_class("pill");
+    create.add_css_class("suggested-action");
+    let join = gtk::Button::with_label("Join with a ticket");
+    join.add_css_class("pill");
+    buttons.append(&create);
+    buttons.append(&join);
+
+    let status = adw::StatusPage::builder()
+        .icon_name("network-workgroup-symbolic")
+        .title("No network yet")
+        .description("Create a private network for your own devices, or join one with a ticket.")
+        .child(&buttons)
+        .vexpand(true)
+        .build();
+    content.append(&status);
+
+    {
+        let net = net.clone();
+        let window = window.clone();
+        create.connect_clicked(move |_| create_dialog(&window, &net));
+    }
+    {
+        let net = net.clone();
+        let window = window.clone();
+        join.connect_clicked(move |_| join_dialog(&window, &net));
+    }
 }
 
 fn render_status(

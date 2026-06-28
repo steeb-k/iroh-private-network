@@ -112,15 +112,16 @@ launcher — out of scope now that IPN is a general VPN.)
 
 ## Nice-to-haves / quick wins (low effort)
 Polish and small ergonomics — likely an afternoon each or less.
-- `--version` on `ipn`, `ipn-daemon`, `ipn-cli`; show the version in the GUI (header/About).
-- An **About** dialog (version, repo link, license, credits).
+- ~~`--version` on `ipn`, `ipn-daemon`, `ipn-cli`; show the version in the GUI~~ (done; About dialog).
+- ~~An **About** dialog (version, repo link, license, credits).~~ (done; repo link pending public repo.)
 - A `cargo fmt` / `clippy` clean pass.
 - Toasts confirming actions ("Ticket copied", "Member removed", "Network frozen").
 - Validate the Join ticket field (reject input that isn't an `ipn1…` ticket, with a clear hint).
 - Disable a button while its action is in flight (avoid double-submits).
 - Remember window size/position between runs.
 - Show this device's own NodeId somewhere + a copy button (useful for `add-key`/debugging).
-- GUI start-hidden / `--minimized` flag (lets autostart launch straight to the tray).
+- ~~GUI start-hidden / `--minimized` flag (lets autostart launch straight to the tray).~~ (done:
+  `--minimized` / `IPN_START_MINIMIZED`; installer autostart entry still to wire up.)
 - Dev convenience scripts: `scripts/run-dev` (start daemon + GUI) and `scripts/test`
   (unit + all ignored e2e) for quick local checks.
 - A short top-level `CONTRIBUTING.md` that points at `docs/development.md`.
