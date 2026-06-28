@@ -1,0 +1,25 @@
+[package]
+name = "ipn-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "IPC contract between the unprivileged IPN GUI and the privileged ipn-daemon."
+
+[features]
+# The wire transport (interprocess socket). Off by default so the protocol types
+# can be used without pulling tokio/interprocess.
+transport = ["dep:interprocess", "dep:tokio", "dep:widestring"]
+
+[dependencies]
+serde.workspace = true
+ciborium.workspace = true
+thiserror.workspace = true
+# Reuse the display DTOs (NetworkStatus/MemberView) from the engine crate; these
+# are plain serde structs.
+ipn-core = { path = "../ipn-core" }
+
+interprocess = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+widestring = { workspace = true, optional = true }

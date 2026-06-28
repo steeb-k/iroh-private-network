@@ -1,0 +1,25 @@
+[package]
+name = "ipn-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "GTK4 desktop GUI for iroh-private-network (engine in-process)."
+
+[[bin]]
+name = "ipn"
+path = "src/main.rs"
+
+[dependencies]
+ipn-ipc = { path = "../ipn-ipc", features = ["transport"] }
+gtk.workspace = true
+adw.workspace = true
+glib.workspace = true
+qrcode.workspace = true
+tokio.workspace = true
+async-channel.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+directories.workspace = true

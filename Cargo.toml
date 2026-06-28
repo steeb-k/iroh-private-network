@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ipn-core",
+    "crates/ipn-ipc",
+    "crates/ipn-daemon",
+    "crates/ipn-cli",
+    "crates/ipn-gui",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/steeb-k/iroh-private-network"
+rust-version = "1.85"
+
+# Shared dependency versions. The iroh ecosystem crates MUST be bumped TOGETHER:
+# they share `iroh-base`, and mixing minors fails to compile. After any bump run
+# `cargo tree -d` and confirm a single `iroh-base` resolves. Versions mirror the
+# proven set from seed-sync-gtk (iroh 1.0 line).
+[workspace.dependencies]
+# --- iroh P2P stack (pin together; all resolve to iroh-base 1.0) ---
+iroh = "1.0"
+iroh-blobs = "0.103"
+iroh-gossip = "0.101"
+iroh-docs = "0.101"
+iroh-tickets = "1.0"
+iroh-mdns-address-lookup = "0.4"
+
+# --- async runtime / utils ---
+tokio = { version = "1", features = ["full"] }
+futures-lite = "2"
+async-channel = "2"
+bytes = "1"
+
+# --- gui (binding versions track installed GTK 4.22 / libadwaita 1.9) ---
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_4"] }
+glib = "0.22"
+qrcode = { version = "0.14", default-features = false }
+
+# --- serialization ---
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+ciborium = "0.2"          # CBOR (serde)
+data-encoding = "2"       # base32 for tickets / key strings
+
+# --- crypto / hashing ---
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+blake3 = "1"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"              # constant-time comparison
+rand = "0.8"
+
+# --- platform / fs ---
+directories = "5"
+hostname = "0.4"
+tun-rs = { version = "2", features = ["async_tokio"] }
+
+# --- ipc / service ---
+interprocess = { version = "2", features = ["tokio"] }
+widestring = "1"
+windows-service = "0.8"
+
+# --- diagnostics / cli ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

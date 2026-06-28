@@ -1,0 +1,5 @@
+# Keep shell scripts LF so they run under bash/WSL even when checked out on Windows.
+*.sh text eol=lf
+# PowerShell + Rust: normalize to LF in the repo; Git renders natively on checkout.
+*.ps1 text
+*.rs text

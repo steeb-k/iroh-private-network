@@ -1,0 +1,50 @@
+[package]
+name = "ipn-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Core engine for iroh-private-network: P2P virtual LAN over iroh."
+
+[dependencies]
+# iroh P2P stack
+iroh.workspace = true
+iroh-blobs.workspace = true
+iroh-gossip.workspace = true
+iroh-docs.workspace = true
+iroh-tickets.workspace = true
+iroh-mdns-address-lookup.workspace = true
+
+# async
+tokio.workspace = true
+futures-lite.workspace = true
+bytes.workspace = true
+
+# serialization
+serde.workspace = true
+serde_bytes.workspace = true
+ciborium.workspace = true
+data-encoding.workspace = true
+
+# crypto
+ed25519-dalek.workspace = true
+blake3.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+rand.workspace = true
+
+# platform / fs
+directories.workspace = true
+hostname.workspace = true
+tun-rs.workspace = true
+
+# diagnostics
+tracing.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

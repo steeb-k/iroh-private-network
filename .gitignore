@@ -1,0 +1,11 @@
+/target
+/dist
+**/*.rs.bk
+*.pdb
+
+# Bundled at package time, not committed
+/vendor/wintun/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
