@@ -70,6 +70,10 @@ pub enum IpcRequest {
     /// Disconnect from the network but keep it saved (go offline). Idempotent.
     Disconnect,
     GetTicket,
+    /// Export the originator master key as a recovery code (originator only).
+    ExportOriginatorKey,
+    /// Import an originator recovery code to gain originator powers on this network.
+    ImportOriginatorKey { code: String },
     /// Upgrade this connection to receive pushed [`IpcEvent`]s.
     Subscribe,
 }
@@ -81,6 +85,8 @@ pub enum IpcResponse {
     /// `None` when this device isn't in a network yet.
     Status(Option<NetworkStatus>),
     Ticket(String),
+    /// An originator recovery code (reply to `ExportOriginatorKey`).
+    Recovery(String),
     Ok,
     Err(String),
 }

@@ -33,6 +33,11 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   address. New `roster` unit tests cover determinism and the concurrent case.
 
 ### Added
+- **Originator key backup & recovery.** The originator can export its master key as a single
+  `ipnkey1…` recovery code (GUI "Back up originator key" → QR + copy, with a keep-it-safe
+  warning; CLI `export-key`). Another member of the same network can import it ("Restore
+  originator access…" / CLI `import-key`) to regain admin powers after device loss — a code for a
+  different network is rejected. New `originator_key_e2e` smoke test.
 - **System tray** (Open IPN / Quit IPN) with minimize-to-tray: closing the window hides it to
   the tray (keeps the connection) and notifies once; "Quit IPN" disconnects from the network
   locally, then exits. tray-icon on Windows/macOS, ksni on Linux; uses `img/trayicon.png`.

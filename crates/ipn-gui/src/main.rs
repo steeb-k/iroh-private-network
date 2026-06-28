@@ -30,6 +30,7 @@ enum UiMsg {
         hostname: String,
         sas: Vec<String>,
     },
+    Recovery(String),
     Toast(String),
     DaemonDown,
     VersionMismatch { daemon: u32, gui: u32 },
@@ -243,6 +244,7 @@ fn build_ui(app: &adw::Application, net: Net, rx: async_channel::Receiver<UiMsg>
                         render_version_mismatch(&content, daemon, gui)
                     }
                     UiMsg::Ticket(t) => show_ticket(&window, &t),
+                    UiMsg::Recovery(code) => show_recovery(&window, &code),
                     UiMsg::JoinSas(sas) => show_join_sas(&window, &sas),
                     UiMsg::JoinRequest {
                         node_id,
@@ -483,7 +485,7 @@ fn render_status(content: &gtk::Box, s: &NetworkStatus, net: &Net, window: &adw:
     });
     content.append(&share);
 
-    // Originator: rotate the secret (mass-revoke + re-key).
+    // Originator: rotate the secret + back up the originator key.
     if s.is_originator {
         let rotate = gtk::Button::builder()
             .label("Rotate secret (re-key)")
@@ -494,6 +496,32 @@ fn render_status(content: &gtk::Box, s: &NetworkStatus, net: &Net, window: &adw:
         let window2 = window.clone();
         rotate.connect_clicked(move |_| confirm_rotate(&window2, &net2));
         content.append(&rotate);
+
+        let backup = gtk::Button::builder()
+            .label("Back up originator key")
+            .halign(gtk::Align::Center)
+            .build();
+        let net3 = net.clone();
+        backup.connect_clicked(move |_| {
+            net3.request(IpcRequest::ExportOriginatorKey, |r| match r {
+                Ok(IpcResponse::Recovery(code)) => Some(UiMsg::Recovery(code)),
+                Ok(IpcResponse::Err(e)) => Some(UiMsg::Toast(e)),
+                _ => None,
+            });
+        });
+        content.append(&backup);
+    } else {
+        // Member: restore originator powers from a recovery code (e.g. after the
+        // originator device was lost).
+        let restore = gtk::Button::builder()
+            .label("Restore originator access…")
+            .halign(gtk::Align::Center)
+            .margin_top(8)
+            .build();
+        let net2 = net.clone();
+        let window2 = window.clone();
+        restore.connect_clicked(move |_| import_originator_dialog(&window2, &net2));
+        content.append(&restore);
     }
 
     // Danger zone: originator can dissolve the whole network; anyone else can leave.
@@ -730,6 +758,64 @@ fn sas_label(sas: &[String]) -> gtk::Label {
     label.set_halign(gtk::Align::Center);
     label.set_wrap(true);
     label
+}
+
+fn show_recovery(window: &adw::ApplicationWindow, code: &str) {
+    let vbox = gtk::Box::new(gtk::Orientation::Vertical, 12);
+    if let Some(pic) = qr_picture(code) {
+        vbox.append(&pic);
+    }
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let entry = gtk::Entry::builder().text(code).editable(false).hexpand(true).build();
+    let copy = gtk::Button::from_icon_name("edit-copy-symbolic");
+    copy.set_valign(gtk::Align::Center);
+    let code_owned = code.to_string();
+    let win = window.clone();
+    copy.connect_clicked(move |_| win.clipboard().set_text(&code_owned));
+    row.append(&entry);
+    row.append(&copy);
+    vbox.append(&row);
+
+    let dialog = adw::MessageDialog::builder()
+        .transient_for(window)
+        .heading("Originator recovery code")
+        .body(
+            "Store this somewhere safe (password manager / offline). Anyone who has it can \
+             administer this network — remove members, freeze, or rotate. Use it to restore \
+             originator access on a replacement device.",
+        )
+        .extra_child(&vbox)
+        .build();
+    dialog.add_response("close", "Close");
+    dialog.set_default_response(Some("close"));
+    dialog.present();
+}
+
+fn import_originator_dialog(window: &adw::ApplicationWindow, net: &Net) {
+    let entry = gtk::Entry::builder().placeholder_text("ipnkey1...").build();
+    let dialog = adw::MessageDialog::builder()
+        .transient_for(window)
+        .heading("Restore originator access")
+        .body("Paste the originator recovery code for THIS network to gain admin powers here.")
+        .extra_child(&entry)
+        .build();
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("import", "Restore");
+    dialog.set_response_appearance("import", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("import"));
+    let net = net.clone();
+    dialog.connect_response(None, move |_, resp| {
+        if resp != "import" {
+            return;
+        }
+        let code = entry.text().to_string();
+        net.request(IpcRequest::ImportOriginatorKey { code }, |r| match r {
+            Ok(IpcResponse::Ok) => Some(UiMsg::Toast("Originator access restored".into())),
+            Ok(IpcResponse::Err(e)) => Some(UiMsg::Toast(e)),
+            _ => None,
+        });
+    });
+    dialog.present();
 }
 
 fn show_join_sas(window: &adw::ApplicationWindow, sas: &[String]) {

@@ -47,6 +47,10 @@ enum Cmd {
     Connect,
     /// Disconnect but keep the network saved (go offline).
     Disconnect,
+    /// Export the originator recovery code (originator only).
+    ExportKey,
+    /// Import an originator recovery code to gain originator powers.
+    ImportKey { code: String },
 }
 
 #[tokio::main]
@@ -68,6 +72,8 @@ async fn main() -> Result<()> {
         Cmd::Leave => IpcRequest::LeaveNetwork,
         Cmd::Connect => IpcRequest::Connect,
         Cmd::Disconnect => IpcRequest::Disconnect,
+        Cmd::ExportKey => IpcRequest::ExportOriginatorKey,
+        Cmd::ImportKey { code } => IpcRequest::ImportOriginatorKey { code },
     };
 
     let resp = oneshot_request(&socket, req)
@@ -104,6 +110,7 @@ async fn main() -> Result<()> {
             }
         }
         IpcResponse::Ticket(t) => println!("{t}"),
+        IpcResponse::Recovery(code) => println!("{code}"),
         IpcResponse::Hello { version } => println!("daemon ipc protocol v{version}"),
         IpcResponse::Ok => println!("ok"),
         IpcResponse::Err(e) => bail!("daemon error: {e}"),

@@ -6,13 +6,13 @@ move it into a release and add a `CHANGELOG.md` entry (see `docs/development.md`
 Legend: **★ recommended next** · ⚠️ known gap/risk in the current code · 💡 idea.
 
 ## ★ Recommended next (short list)
-1. **Originator key backup & recovery** (export/import recovery phrase) — the design promises a
-   portable master key, but it currently only lives in one device's keystore.
-2. **Self-host relay setting** — independence/privacy; you flagged this early.
-3. **"Connect" button per member** that launches the platform RDP/SSH client at the peer's IP —
+1. **"Connect" button per member** that launches the platform RDP/SSH client at the peer's IP —
    biggest UX win for the actual use case.
+2. **Self-host relay setting** — independence/privacy. Targeted for **nearer release** (not
+   urgent while n0's public relays work).
 
-(Done: virtual-IP race → deterministic IPs; secrets → OS keystore.)
+(Done: virtual-IP race → deterministic IPs; secrets → OS keystore; originator key backup &
+recovery → export/import recovery code in GUI + CLI.)
 
 ## Known issues / risks to investigate
 - ✅ **Virtual-IP assignment race — FIXED.** IPs are no longer chosen by the approver; each
@@ -27,12 +27,11 @@ Legend: **★ recommended next** · ⚠️ known gap/risk in the current code ·
   regenerating identity when the keystore is briefly unavailable (it errors instead). The
   on-disk `network.cbor` holds only non-secret fields. (Assumes one daemon instance per
   machine/user; `IPN_SECRETS_FILE_ONLY=1` forces the file backend, used by tests.)
-- 🟡 **Roster ordering trusts wall-clock timestamps — partially mitigated.** Done: far-future
-  timestamps are dropped (`MAX_FUTURE_SKEW_MS`), and a member can't sign an `Add` backdated to
-  before its own admission. **Residual:** a current member could still backdate an `Add` into a
-  past *unfrozen* window to slip a device past a freeze. Fully closing it needs causal ordering
-  (hash-linked DAG / version vectors) — bigger change, deferred; originator remove/rotate is the
-  backstop. (Honest clock skew between members is the benign version of the same thing.)
+- 🟢 **Roster ordering trusts wall-clock timestamps — mitigated, residual accepted.** Done:
+  far-future timestamps are dropped (`MAX_FUTURE_SKEW_MS`), and a member can't sign an `Add`
+  backdated to before its own admission. The deeper case (a *trusted* member backdating an `Add`
+  into a past unfrozen window) would need causal ordering (a DAG) — **not being pursued**: it's
+  out of scope for a personal network of your own devices, and remove/rotate is the backstop.
 - 🟡 **Doc can be spammed — partially mitigated.** Done: the fold only considers `e/`-prefixed
   entries, skips oversized values (`MAX_ENTRY_BYTES`), and caps how many it folds
   (`MAX_ENTRIES`), so a spammed replica can't OOM/peg a member. **Residual:** a malicious member

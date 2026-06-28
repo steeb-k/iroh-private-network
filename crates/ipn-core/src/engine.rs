@@ -34,7 +34,9 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 
 use crate::admission;
 use crate::membership;
-use crate::network::{generate_originator_key, NetworkSecret, Ticket};
+use crate::network::{
+    decode_recovery_key, encode_recovery_key, generate_originator_key, NetworkSecret, Ticket,
+};
 use crate::node::IrohNode;
 use crate::presence::{Presence, PresenceTracker};
 use crate::roster::{now_ms, sign, Config, Id, Op, Roster};
@@ -609,6 +611,38 @@ impl Engine {
         let ticket = Ticket::new(name, subnet, &secret, originator_id, self.inner.node.addr());
         let _ = self.inner.events.send(EngineEvent::Changed);
         Ok(ticket.encode())
+    }
+
+    /// Export this device's originator master key as a recovery code, to back up
+    /// (the authority survives device loss) or move to another device. Originator
+    /// only.
+    pub async fn export_originator_key(&self) -> Result<String> {
+        let st = self.inner.state.lock().await;
+        let cfg = st.config.as_ref().context("no network")?;
+        let secret = cfg
+            .originator_secret
+            .context("this device does not hold the originator master key")?;
+        Ok(encode_recovery_key(&secret))
+    }
+
+    /// Import an originator recovery code, granting this device originator powers
+    /// for the network it's already in. The code must match this network's
+    /// originator (you can't graft a different network's authority on).
+    pub async fn import_originator_key(&self, recovery: &str) -> Result<()> {
+        let secret = decode_recovery_key(recovery)?;
+        let originator_pub = SigningKey::from_bytes(&secret).verifying_key().to_bytes();
+        let mut cfg = {
+            let st = self.inner.state.lock().await;
+            st.config.clone().context("no network on this device")?
+        };
+        if originator_pub != cfg.originator_id {
+            bail!("this recovery code is for a different network");
+        }
+        cfg.originator_secret = Some(secret);
+        save_config(&self.inner.data_dir, &cfg)?;
+        self.inner.state.lock().await.config = Some(cfg);
+        let _ = self.inner.events.send(EngineEvent::Changed);
+        Ok(())
     }
 
     /// Leave the network on this device only (local teardown; does not affect

@@ -150,10 +150,37 @@ impl Ticket {
 }
 
 /// The originator master keypair — exportable super-admin authority. Generate
-/// once when creating a network; back up the recovery phrase / key file so the
-/// authority survives device loss; re-import on a new device.
+/// once when creating a network; back up the recovery code so the authority
+/// survives device loss; re-import on a new device.
 pub fn generate_originator_key() -> SigningKey {
     SigningKey::generate(&mut rand::rngs::OsRng)
+}
+
+const RECOVERY_PREFIX: &str = "ipnkey1";
+
+/// Encode the originator master secret as a single copy/save-able **recovery
+/// code** (`ipnkey1<base32>`). Anyone holding this can administer the network, so
+/// it must be stored securely.
+pub fn encode_recovery_key(secret: &[u8; 32]) -> String {
+    format!(
+        "{RECOVERY_PREFIX}{}",
+        data_encoding::BASE32_NOPAD.encode(secret).to_lowercase()
+    )
+}
+
+/// Decode a recovery code back to the 32-byte originator secret.
+pub fn decode_recovery_key(s: &str) -> Result<[u8; 32]> {
+    let body = s
+        .trim()
+        .strip_prefix(RECOVERY_PREFIX)
+        .context("not an IPN recovery code (missing ipnkey1 prefix)")?;
+    let bytes = data_encoding::BASE32_NOPAD
+        .decode(body.to_uppercase().as_bytes())
+        .context("recovery code is not valid base32")?;
+    bytes
+        .as_slice()
+        .try_into()
+        .context("recovery code must be 32 bytes")
 }
 
 #[cfg(test)]
@@ -208,5 +235,15 @@ mod tests {
     fn ticket_rejects_garbage() {
         assert!(Ticket::decode("hello").is_err());
         assert!(Ticket::decode("ipn1!!!!").is_err());
+    }
+
+    #[test]
+    fn recovery_key_roundtrips() {
+        let secret = [42u8; 32];
+        let code = encode_recovery_key(&secret);
+        assert!(code.starts_with("ipnkey1"));
+        assert_eq!(decode_recovery_key(&code).unwrap(), secret);
+        assert!(decode_recovery_key("nope").is_err());
+        assert!(decode_recovery_key("ipnkey1!!!!").is_err());
     }
 }
