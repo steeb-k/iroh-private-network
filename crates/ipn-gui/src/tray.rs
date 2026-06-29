@@ -21,7 +21,7 @@ pub fn install(
     use adw::prelude::*;
     use gtk::glib;
     use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-    use tray_icon::{TrayIconBuilder, TrayIconEvent};
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     // Make native popups (the tray context menu) honor the app's color scheme.
     #[cfg(windows)]
@@ -59,8 +59,16 @@ pub fn install(
         let mut open_window = false;
         let mut quit = false;
         while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-            if matches!(ev, TrayIconEvent::DoubleClick { .. }) {
-                open_window = true;
+            // Open on double-click (Windows) or a left single-click (covers macOS,
+            // where DoubleClick isn't emitted — and friendlier on Windows too).
+            match ev {
+                TrayIconEvent::DoubleClick { .. }
+                | TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => open_window = true,
+                _ => {}
             }
         }
         while let Ok(ev) = MenuEvent::receiver().try_recv() {
