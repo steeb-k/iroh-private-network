@@ -562,6 +562,27 @@ fn build_ui(
         app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
     }
 
+    // "Back" navigation: Alt+Left, or Backspace (unless typing in a text field),
+    // backs out of an open flyout to the main page.
+    {
+        let split = ui.split.clone();
+        let window2 = window.clone();
+        let key = gtk::EventControllerKey::new();
+        key.connect_key_pressed(move |_, keyval, _, state| {
+            let alt = state.contains(gtk::gdk::ModifierType::ALT_MASK);
+            let typing = adw::prelude::GtkWindowExt::focus(&window2)
+                .is_some_and(|w| w.is::<gtk::Text>() || w.is::<gtk::TextView>());
+            let is_back = (alt && keyval == gtk::gdk::Key::Left)
+                || (keyval == gtk::gdk::Key::BackSpace && !typing);
+            if is_back && split.shows_sidebar() {
+                split.set_show_sidebar(false);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        window.add_controller(key);
+    }
+
     {
         let app = app.clone();
         let notified = std::cell::Cell::new(false);
