@@ -528,9 +528,11 @@ fn build_ui(
                                 });
                             }
                         }
-                        let n = gtk::gio::Notification::new(&format!("“{hostname}” wants to join"));
-                        n.set_body(Some("Open IPN to approve or deny."));
-                        app_n.send_notification(None, &n);
+                        notify(
+                            &app_n,
+                            &format!("“{hostname}” wants to join"),
+                            Some("Open IPN to approve or deny."),
+                        );
                         if let Some(s) = state.borrow().as_ref() {
                             render_if_changed(&ui, s, &net, &window, &pending, &last_sig);
                         }
@@ -594,11 +596,11 @@ fn build_ui(
             if !notified.replace(true) {
                 // Put the message in the title — many Linux notification daemons
                 // show the title prominently and hide/clip the body.
-                let n = gtk::gio::Notification::new("IPN is still running in the tray");
-                n.set_body(Some(
-                    "Click the tray icon to reopen, or “Quit IPN” to disconnect.",
-                ));
-                app.send_notification(Some("ipn-tray"), &n);
+                notify(
+                    &app,
+                    "IPN is still running in the tray",
+                    Some("Click the tray icon to reopen, or “Quit IPN” to disconnect."),
+                );
             }
             glib::Propagation::Stop
         });
@@ -1642,6 +1644,27 @@ fn show_about(window: &adw::ApplicationWindow) {
     about.present();
 }
 
+/// Show a desktop notification (title + optional body).
+///
+/// **No-op on Windows.** GLib's `GNotification` backend there creates its own
+/// notification-area icon (using the app icon) to host toasts — which shows up as
+/// a confusing *second* tray icon beside ours that does nothing. Until we wire
+/// native WinRT toasts (needs an AppUserModelID on the Start-menu shortcut), skip
+/// GNotification on Windows; the tray icon and the in-app "Join Request" chip
+/// already surface these events. Linux/macOS get real notifications.
+fn notify(app: &adw::Application, title: &str, body: Option<&str>) {
+    #[cfg(not(windows))]
+    {
+        let n = gtk::gio::Notification::new(title);
+        if let Some(b) = body {
+            n.set_body(Some(b));
+        }
+        app.send_notification(None, &n);
+    }
+    #[cfg(windows)]
+    let _ = (app, title, body);
+}
+
 /// Notify when a member transitions offline→online (skips the first render).
 fn notify_newly_online(app: &adw::Application, prev: Option<&NetworkStatus>, new: &NetworkStatus) {
     let Some(prev) = prev else { return };
@@ -1656,8 +1679,7 @@ fn notify_newly_online(app: &adw::Application, prev: Option<&NetworkStatus>, new
                 .clone()
                 .or_else(|| m.hostname.clone())
                 .unwrap_or_else(|| short_id(&m.node_id));
-            let n = gtk::gio::Notification::new(&format!("{name} came online"));
-            app.send_notification(None, &n);
+            notify(app, &format!("{name} came online"), None);
         }
     }
 }

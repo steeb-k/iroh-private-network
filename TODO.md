@@ -15,19 +15,33 @@ packaging: `docs/{windows,linux,macos}-packaging.md`.
   in release builds (`#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem="windows")]`).
 - ✅ **Friendly name didn't redraw** until the flyout closed — fixed: `set_nickname_dialog` now
   optimistically re-`fill_member`s the open detail + refreshes the list on save.
+- ✅ **Two Windows tray icons** (a stray app-icon one that did nothing + our functional one) —
+  fixed: GLib's `GNotification` backend was spinning up its own notification-area icon to host
+  toasts. All `send_notification` now goes through a `notify()` helper that is a **no-op on
+  Windows** (Linux/macOS unchanged). *Verify on Windows.* Follow-up: native **WinRT toasts** on
+  Windows (needs an AppUserModelID on the MSI's Start-menu shortcut) to bring those notices back.
+- ✅ **"Big issue" — joining gives full LAN access? NO leak.** Code audit + live host scan
+  confirm IPN only routes `10.99.0.0/24` (no route to physical subnets, no IP forwarding/NAT).
+  The observed "full access" was a test artifact: the test laptop's phone hotspot was bridging
+  the phone's own Wi-Fi, putting it back on the home LAN, so RDP reached `192.168.x` over the
+  ordinary LAN — IPN uninvolved. Keep the flat virtual-LAN model. (Verification method now in
+  MANUAL-TESTING.md: isolate the remote box; connect to `10.99.0.x`, never `192.168.x`.)
 - ⚠️ **Linux .desktop icon shows broken (magenta/black).** The generated PNGs are *valid*
   (verified with `identify`), so it's a theme-lookup/path issue, not a corrupt file. Likely the
   installed `/usr/local/share/icons/hicolor` base isn't picked up (XDG_DATA_DIRS / icon-cache /
   missing `index.theme`), or the screenshot was the *uninstalled* tarball `.desktop`. Fix:
   confirm the scenario, then ensure the icon resolves (run `gtk-update-icon-cache` on the base,
   and/or also install to a definitely-searched path, or ship a pixmaps fallback).
-- 🔴 **Stopping `ipn-daemon` does NOT drop live connections (major).** Root cause: there is **no
-  teardown path** — `serve()` just `break`s its loop and returns, and `Engine` has no
-  `shutdown()`/`Drop`/`endpoint.close()`. So nothing closes the iroh endpoint, removes the TUN,
-  or aborts the mesh/router tasks; the device stays reachable. Fix: add `Engine::shutdown()`
-  (abort net tasks → drop the TUN → `endpoint.close().await`) and call it from `serve()` on the
-  shutdown branch (and verify the service process actually exits / the wintun adapter is removed).
-  Likely **related to revocation teardown** — discuss with the maintainer before implementing.
+- 🟡 **Daemon teardown — add graceful shutdown.** Stopping the service *does* drop connectivity in
+  practice (process exit removes the TUN; confirmed once the test rig was on a different network),
+  so the earlier "doesn't drop" was the same-LAN artifact above. Still worth doing for
+  graceful/deterministic teardown: `Engine` has no `shutdown()`/`Drop` and `IrohNode::shutdown()`
+  (node.rs:129) is never called. Add `Engine::shutdown()` (abort net tasks → drop TUN →
+  `endpoint.close()`) and call it from `serve()`'s shutdown branch.
+- 🟡 **Inbound packet filter (defense in depth).** The inbound datagram pump writes any peer's
+  packet to the TUN unchecked; drop packets whose dst isn't in `10.99.0.0/24` (and optionally
+  require src == that peer's roster vIP). The OS already drops stray dsts (forwarding off), so
+  this is hardening, not a live hole.
 
 ## ★ Recommended next (short list)
 IPN is a **general-purpose ad-hoc VPN** (not RDP-specific). The known-issue hardening list is
