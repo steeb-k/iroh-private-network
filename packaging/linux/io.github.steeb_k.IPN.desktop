@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Iroh Private Network
+GenericName=Private VPN
+Comment=Connect your own devices into a private peer-to-peer LAN over iroh
+Exec=ipn
+Icon=io.github.steeb_k.IPN
+Terminal=false
+Categories=Network;Security;
+Keywords=vpn;p2p;iroh;lan;mesh;
+StartupNotify=true

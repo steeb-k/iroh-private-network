@@ -1,105 +1,75 @@
 #!/usr/bin/env bash
-# Build the iroh-private-network Linux release tarball (run in WSL / on Linux).
+# Build the Iroh Private Network (IPN) Linux release tarball.
 #
 #   scripts/package-linux.sh              cargo build --release, then package
-#   scripts/package-linux.sh --skip-build package the existing target/release bin
+#   scripts/package-linux.sh --skip-build package the existing target/release bins
 #
 # Output: dist/ipn-<version>-linux-x86_64.tar.gz
 #
-# Like seed-sync, this relies on SYSTEM GTK on the target (no bundling):
+# The tarball is installed system-wide by the bundled `ipnctl --install` (which
+# uses sudo): binaries to /usr/local/bin, a root systemd service for the daemon
+# (it needs CAP_NET_ADMIN for the TUN), a root daily update timer, and an app-menu
+# entry. Relies on the target having system GTK 4.10+/libadwaita 1.4+ (not bundled):
 #   sudo apt install libgtk-4-1 libadwaita-1-0
 # Build-time also needs: libgtk-4-dev libadwaita-1-dev pkg-config build-essential
-# Routing needs /dev/net/tun + CAP_NET_ADMIN (run the binary with sudo).
+#
+# Requires: cargo, tar, and ImageMagick (`magick` or `convert`) for icon sizes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+APP_ID="io.github.steeb_k.IPN"
+PKG_SRC="$ROOT/packaging/linux"
+ICON_SRC="$ROOT/img/icon-spin.png"
+ICON_SIZES="16 22 24 32 48 64 128 256 512"
+
 cd "$ROOT"
-# Version lives in the workspace root [workspace.package] (crates use version.workspace).
 VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-[ -n "${VERSION:-}" ] || { echo "package-linux: could not read version" >&2; exit 1; }
+[ -n "${VERSION:-}" ] || { echo "package-linux: could not read version from Cargo.toml" >&2; exit 1; }
 NAME="ipn-${VERSION}-linux-x86_64"
 echo "package-linux: building $NAME"
 
 if [ "${1:-}" != "--skip-build" ]; then
-  cargo build --release -p ipn-gui -p ipn-daemon -p ipn-cli
+  cargo build --release -p ipn-daemon -p ipn-gui -p ipn-cli
+fi
+
+# ImageMagick entrypoint (IM7 = magick, IM6 = convert).
+if command -v magick >/dev/null 2>&1; then IM="magick"
+elif command -v convert >/dev/null 2>&1; then IM="convert"
+else echo "package-linux: ImageMagick (magick/convert) is required for icon generation" >&2; exit 1
 fi
 
 STAGE="$ROOT/dist/$NAME"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/bin" "$STAGE/share/applications" \
-         "$STAGE/share/icons/hicolor/256x256/apps"
-
-# App icon, named after the app-id so the .desktop entry + window match it.
-install -m 0644 "$ROOT/img/icon-spin.png" \
-  "$STAGE/share/icons/hicolor/256x256/apps/io.github.steeb_k.IPN.png"
+mkdir -p "$STAGE/bin" \
+         "$STAGE/share/applications" \
+         "$STAGE/lib/systemd/system"
 
 # GUI (unprivileged), daemon (owns the TUN), CLI.
-install -m 0755 "target/release/ipn" "$STAGE/bin/ipn"
-install -m 0755 "target/release/ipn-daemon" "$STAGE/bin/ipn-daemon"
-install -m 0755 "target/release/ipn-cli" "$STAGE/bin/ipn-cli"
+for b in ipn-daemon ipn ipn-cli; do
+  install -m 0755 "target/release/$b" "$STAGE/bin/$b"
+done
 
-# License (GPLv3 + Wintun exception). Linux uses the kernel TUN, so no Wintun here.
-install -m 0644 "$ROOT/LICENSE" "$STAGE/LICENSE.txt"
+# Installer/updater manager + docs (tarball root)
+install -m 0755 "$PKG_SRC/ipnctl"      "$STAGE/ipnctl"
+install -m 0644 "$PKG_SRC/INSTALL.txt" "$STAGE/INSTALL.txt"
+install -m 0644 "$ROOT/LICENSE"        "$STAGE/LICENSE"
 
-# Wrapper: run as the normal user (a GUI must NOT run under sudo). It starts the
-# daemon in the background if it isn't already running, then launches the GUI.
-# The daemon carries the CAP_NET_ADMIN capability granted by ./enable-routing.sh,
-# so no sudo is needed at run time.
-cat > "$STAGE/ipn" <<'WRAP'
-#!/usr/bin/env bash
-HERE="$(cd "$(dirname "$0")" && pwd)"
-if [ "$(id -u)" = "0" ] && [ -z "${IPN_ALLOW_ROOT:-}" ]; then
-  echo "Don't run IPN with sudo — the GUI needs your user's display." >&2
-  exit 1
-fi
-# Start the daemon if the IPC socket isn't already there (a second daemon just
-# exits when it can't bind, so this is safe even on a race).
-if [ ! -S /tmp/ipn.sock ]; then
-  nohup "$HERE/bin/ipn-daemon" run >/tmp/ipn-daemon.log 2>&1 &
-  sleep 1
-fi
-exec "$HERE/bin/ipn" "$@"
-WRAP
-chmod 0755 "$STAGE/ipn"
+# Desktop entry
+install -m 0644 "$PKG_SRC/$APP_ID.desktop" "$STAGE/share/applications/$APP_ID.desktop"
 
-# One-time helper: grant CAP_NET_ADMIN to the DAEMON so it can create the TUN
-# while running as your normal user (no sudo needed afterwards).
-cat > "$STAGE/enable-routing.sh" <<'CAP'
-#!/usr/bin/env bash
-HERE="$(cd "$(dirname "$0")" && pwd)"
-set -e
-sudo setcap cap_net_admin,cap_net_raw+ep "$HERE/bin/ipn-daemon"
-echo "Routing enabled. Now run: ./ipn"
-CAP
-chmod 0755 "$STAGE/enable-routing.sh"
+# systemd SYSTEM units (installed to /etc/systemd/system by ipnctl)
+install -m 0644 "$PKG_SRC/ipn-daemon.service"  "$STAGE/lib/systemd/system/ipn-daemon.service"
+install -m 0644 "$PKG_SRC/ipn-update.service"  "$STAGE/lib/systemd/system/ipn-update.service"
+install -m 0644 "$PKG_SRC/ipn-update.timer"    "$STAGE/lib/systemd/system/ipn-update.timer"
 
-cat > "$STAGE/share/applications/io.github.steeb_k.IPN.desktop" <<'DESK'
-[Desktop Entry]
-Type=Application
-Name=iroh-private-network
-Comment=Peer-to-peer virtual LAN over iroh
-Exec=ipn
-Icon=io.github.steeb_k.IPN
-Categories=Network;
-Terminal=false
-DESK
+# hicolor icons, generated from the master PNG (pre-rendered so targets need no tools)
+for sz in $ICON_SIZES; do
+  dir="$STAGE/share/icons/hicolor/${sz}x${sz}/apps"
+  mkdir -p "$dir"
+  "$IM" "$ICON_SRC" -resize "${sz}x${sz}" "$dir/$APP_ID.png"
+done
 
-cat > "$STAGE/INSTALL.txt" <<'TXT'
-iroh-private-network (Linux)
-
-Requires system GTK4 + libadwaita:
-  sudo apt install libgtk-4-1 libadwaita-1-0
-
-One-time, to enable routing (RDP/SSH over the virtual LAN):
-  ./enable-routing.sh   # sudo setcap cap_net_admin,cap_net_raw+ep bin/ipn-daemon
-
-Then just run (as your normal user — never sudo the GUI):
-  ./ipn                 # starts the daemon in the background if needed, opens the GUI
-
-Architecture: bin/ipn-daemon (owns the TUN + iroh node) runs in the background;
-bin/ipn is the unprivileged GUI; bin/ipn-cli is an optional headless client.
-TXT
-
+# Tarball
 mkdir -p "$ROOT/dist"
 tar -czf "$ROOT/dist/$NAME.tar.gz" -C "$ROOT/dist" "$NAME"
 echo "package-linux: wrote dist/$NAME.tar.gz"
