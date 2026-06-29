@@ -6,10 +6,28 @@ move it into a release and add a `CHANGELOG.md` entry (see `docs/development.md`
 Legend: **★ recommended next** · ⚠️ known gap/risk in the current code · 💡 idea.
 
 ## Release status
-Prereleases are tagged `v0.0.1-test<N>` (local builds, no CI). Latest published: **v0.0.1-test12**
-(public IP advertise + geolocation). Unreleased on `main` since then: state-in-location
-(City, State, Country), inline DB-IP attribution + tooltip, focus-loss fix, and "last seen"
-removed from the main member list — these are built locally but **not yet cut as test13**.
+**0.1.0** is published (signed Windows MSI + Linux tarball; macOS pending a Mac build) as a full
+release on the now-**public** repo, with auto-update wired on all platforms. Per-platform
+packaging: `docs/{windows,linux,macos}-packaging.md`.
+
+## 0.1.1 — fixes queued (from hands-on testing)
+- ✅ **Windows console window** alongside the GUI — fixed: `ipn-gui` is now a GUI-subsystem binary
+  in release builds (`#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem="windows")]`).
+- ✅ **Friendly name didn't redraw** until the flyout closed — fixed: `set_nickname_dialog` now
+  optimistically re-`fill_member`s the open detail + refreshes the list on save.
+- ⚠️ **Linux .desktop icon shows broken (magenta/black).** The generated PNGs are *valid*
+  (verified with `identify`), so it's a theme-lookup/path issue, not a corrupt file. Likely the
+  installed `/usr/local/share/icons/hicolor` base isn't picked up (XDG_DATA_DIRS / icon-cache /
+  missing `index.theme`), or the screenshot was the *uninstalled* tarball `.desktop`. Fix:
+  confirm the scenario, then ensure the icon resolves (run `gtk-update-icon-cache` on the base,
+  and/or also install to a definitely-searched path, or ship a pixmaps fallback).
+- 🔴 **Stopping `ipn-daemon` does NOT drop live connections (major).** Root cause: there is **no
+  teardown path** — `serve()` just `break`s its loop and returns, and `Engine` has no
+  `shutdown()`/`Drop`/`endpoint.close()`. So nothing closes the iroh endpoint, removes the TUN,
+  or aborts the mesh/router tasks; the device stays reachable. Fix: add `Engine::shutdown()`
+  (abort net tasks → drop the TUN → `endpoint.close().await`) and call it from `serve()` on the
+  shutdown branch (and verify the service process actually exits / the wintun adapter is removed).
+  Likely **related to revocation teardown** — discuss with the maintainer before implementing.
 
 ## ★ Recommended next (short list)
 IPN is a **general-purpose ad-hoc VPN** (not RDP-specific). The known-issue hardening list is

@@ -1,3 +1,6 @@
+// Release Windows builds are a GUI-subsystem binary so launching the app doesn't
+// pop a console window. Debug keeps the console for dev logging.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 //! iroh-private-network desktop GUI (GTK4 + libadwaita) — an **unprivileged IPC
 //! client** to `ipn-daemon`. The daemon owns the iroh node + TUN (the only thing
 //! needing elevation); this process just renders state and sends commands, so it
@@ -1160,9 +1163,9 @@ fn fill_member(
         let edit = icon_button("document-edit-symbolic", "Set a local nickname for this member");
         let window2 = window.clone();
         let net2 = net.clone();
-        let id = m.node_id.clone();
-        let cur = m.label.clone();
-        edit.connect_clicked(move |_| set_nickname_dialog(&window2, &net2, &id, cur.clone()));
+        let ui2 = ui.clone();
+        let m2 = m.clone();
+        edit.connect_clicked(move |_| set_nickname_dialog(&window2, &net2, &ui2, &m2, is_originator));
         name_row.add_suffix(&edit);
         g.add(&name_row);
     }
@@ -1499,11 +1502,12 @@ fn join_dialog(window: &adw::ApplicationWindow, net: &Net) {
 fn set_nickname_dialog(
     window: &adw::ApplicationWindow,
     net: &Net,
-    node_id: &str,
-    current: Option<String>,
+    ui: &Ui,
+    m: &MemberView,
+    is_originator: bool,
 ) {
     let entry = gtk::Entry::builder()
-        .text(current.unwrap_or_default())
+        .text(m.label.clone().unwrap_or_default())
         .placeholder_text("Nickname (leave blank to clear)")
         .build();
     let dialog = adw::MessageDialog::builder()
@@ -1520,7 +1524,9 @@ fn set_nickname_dialog(
     dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("save"));
     let net = net.clone();
-    let node_id = node_id.to_string();
+    let ui = ui.clone();
+    let m = m.clone();
+    let window = window.clone();
     dialog.connect_response(None, move |_, resp| {
         if resp != "save" {
             return;
@@ -1528,13 +1534,22 @@ fn set_nickname_dialog(
         let text = entry.text().to_string();
         let name = if text.trim().is_empty() { None } else { Some(text) };
         net.request(
-            IpcRequest::SetNickname { node_id: node_id.clone(), name },
+            IpcRequest::SetNickname {
+                node_id: m.node_id.clone(),
+                name: name.clone(),
+            },
             |r| match r {
                 Ok(IpcResponse::Ok) => Some(UiMsg::Toast("Nickname updated".into())),
                 Ok(IpcResponse::Err(e)) => Some(UiMsg::Toast(e)),
                 _ => None,
             },
         );
+        // Redraw the open detail flyout immediately (optimistic — the nickname is
+        // local, so it effectively never fails), and refresh the main list.
+        let mut updated = m.clone();
+        updated.label = name;
+        fill_member(&ui, &updated, is_originator, &net, &window);
+        net.refresh();
     });
     dialog.present();
 }
