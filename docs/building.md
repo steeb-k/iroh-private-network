@@ -7,7 +7,7 @@ A Rust workspace. Desktop builds need GTK4 + libadwaita available to `pkg-config
 - **Linux:** `sudo apt install libgtk-4-dev libadwaita-1-dev pkg-config build-essential`
 - **Windows:** the MSVC toolchain and GTK4 + libadwaita via
   [gvsbuild](https://github.com/wingtk/gvsbuild) (the scripts assume it's at `C:\gtk`).
-- **macOS:** GTK4 + libadwaita via Homebrew (build supported; packaging not scripted yet).
+- **macOS:** GTK4 + libadwaita via Homebrew (`brew install gtk4 libadwaita pkg-config`).
 
 ## Run in development
 The daemon (privileged, owns the TUN) and the GUI (unprivileged) run as separate processes.
@@ -41,5 +41,7 @@ cargo test -p ipn-core --test rotate_e2e   -- --ignored   # rotate locks out old
 ```
 
 ## Packaging & releasing
-Building the distributable artifacts and cutting a release has its own guide:
-**[releasing.md](releasing.md)** (portable zip/tarball today; installers are a documented TODO).
+Building the installers and cutting a release has its own guides:
+**[releasing.md](releasing.md)** (the end-to-end flow) plus the per-platform detail in
+**[windows-packaging.md](windows-packaging.md)** (signed MSI + auto-updater),
+**[linux-packaging.md](linux-packaging.md)**, and **[macos-packaging.md](macos-packaging.md)**.

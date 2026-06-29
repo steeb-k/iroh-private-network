@@ -13,8 +13,8 @@ client you already use.
 It's like Hamachi / ZeroTier / Tailscale, but with **no accounts and no central server** — your
 devices find and authenticate each other directly (built on [iroh](https://www.iroh.computer)).
 
-> **Status:** early prerelease, under active testing. Works today on **Windows and Linux**
-> (macOS and Android planned). Grab a build from the
+> **Status:** 0.1.0, under active testing. Works on **Windows, Linux, and macOS** (Android
+> planned). Grab an installer from the
 > [Releases](https://github.com/steeb-k/iroh-private-network/releases) page.
 
 ## What it does
@@ -26,22 +26,27 @@ devices find and authenticate each other directly (built on [iroh](https://www.i
   devices show a short **emoji code** you compare to confirm it's really them, then approve.
 - **You stay in control.** Remove a device, freeze the network so no one new can join, or
   rotate its secret to reset access entirely. Removed devices drop off automatically.
+- **Stays up to date.** A small background updater keeps every device on the latest release.
 - **Nothing to sign up for, nothing to host.** No accounts, no coordinator server.
 
 ## Get it
-Download the latest build for your OS from the
-[Releases](https://github.com/steeb-k/iroh-private-network/releases) page.
 
-**Windows**
-1. Unzip.
-2. Run **`1. Install service (admin).bat`** once and approve the prompt — this installs the
-   small background service that does the networking.
-3. Run **`2. IPN.bat`** to open the app.
+**Windows** — download `ipn-<version>-windows-x86_64.msi` from the
+[Releases](https://github.com/steeb-k/iroh-private-network/releases) page and run it (it's
+code-signed). It installs the app plus the background networking service and keeps itself
+updated. Launch **Iroh Private Network** from the Start menu.
 
-**Linux** (needs GTK: `sudo apt install libgtk-4-1 libadwaita-1-0`)
-1. Extract the tarball.
-2. Run `./enable-routing.sh` once (grants the networking permission).
-3. Run `./ipn`.
+**Linux & macOS** — one line in a terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/steeb-k/iroh-private-network/main/install.sh | sh
+```
+
+It downloads the right build, sets up the background service (you'll be asked for your password
+once, because the service needs permission to create the virtual network interface), and enables
+daily auto-updates. On **Linux** you also need the system GTK runtime:
+`sudo apt install libgtk-4-1 libadwaita-1-0`. Afterwards, manage it with `ipnctl`
+(`ipnctl --status`, `--update`, `--uninstall`). On **macOS** the app lands in `/Applications`.
 
 ## Using it
 1. On one device: **+ → Create a network**, then share the ticket (copy it, or show the QR).
@@ -63,7 +68,7 @@ Built on a lot of other people's work:
   [iroh-gossip](https://github.com/n0-computer/iroh-gossip),
   [iroh-blobs](https://github.com/n0-computer/iroh-blobs), iroh-tickets,
   [iroh-mdns-address-lookup](https://github.com/n0-computer/iroh)) by
-  [number 0](https://www.iroh.computer) — the peer-to-peer foundation IPN is built on.
+  [n0](https://www.iroh.computer) — the peer-to-peer foundation IPN is built on.
 - **[dumbpipe](https://github.com/n0-computer/dumbpipe)** (n0) — used to validate the approach
   early on.
 - **[iroh-lan](https://github.com/rustonbsd/iroh-lan)** by rustonbsd — prior art for a virtual

@@ -43,8 +43,15 @@ cargo test -p ipn-core --test engine_e2e -- --ignored
 cargo test -p ipn-core --test delete_e2e -- --ignored
 cargo test -p ipn-core --test rotate_e2e -- --ignored
 ```
-Packaging + releases: see `docs/releasing.md`. Builds are **local** (Windows native; Linux/
-Android via WSL on the maintainer's machine). **Do not add GitHub Actions / CI.**
+Packaging + releases: see `docs/releasing.md` (+ `windows-/linux-/macos-packaging.md`). From
+0.1.0 we ship real installers with auto-update: a **code-signed Windows MSI** (`scripts/
+build-msi.ps1`, Azure Trusted Signing), a **Linux** system-service tarball (`scripts/
+package-linux.sh` + `packaging/linux/ipnctl`), and a **macOS** universal `.app` tarball
+(`scripts/package-macos.sh`, built on a Mac). Releases are `gh release` uploads to the **public**
+`steeb-k/iroh-private-network` repo; the in-product updaters + `install.sh` read its
+`releases/latest`. The signing metadata (`artifact-signing-metadata.json`) is **git-ignored** —
+never commit it. Builds are **local** (Windows native; Linux/Android via WSL; macOS on a Mac).
+**Do not add GitHub Actions / CI.**
 
 ## Adding a feature — the workflow
 1. **Engine first.** Implement the behavior as a method on `Engine` in `ipn-core` (or a new
@@ -61,8 +68,8 @@ Android via WSL on the maintainer's machine). **Do not add GitHub Actions / CI.*
 5. **GUI.** Add a `UiMsg`/control path in `ipn-gui` and render it. Never block the GTK thread —
    issue requests via `Net::request` and update on the `async-channel`.
 6. **Document it (required, same change).** See the rule below.
-7. **Build both desktops** (`scripts/bundle-gtk-windows.ps1` and, via WSL,
-   `scripts/package-linux.sh`) before cutting a release.
+7. **Build the installers** for each platform on its own OS (`scripts/build-msi.ps1` on Windows,
+   `scripts/package-linux.sh` via WSL, `scripts/package-macos.sh` on a Mac) before a release.
 
 ### Definition of done
 A feature isn't done until: it compiles on Windows **and** Linux; `cargo test -p ipn-core`

@@ -89,6 +89,14 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   address. New `roster` unit tests cover determinism and the concurrent case.
 
 ### Added
+- **Real installers with auto-update (0.1.0).** Windows: a **code-signed MSI** (`scripts/
+  build-msi.ps1`, WiX + Azure Trusted Signing) that installs to `Program Files\IPN`, registers
+  the `IPNDaemon` service + a daily `IPNUpdate` scheduled task, and adds shortcuts. Linux/macOS:
+  a one-line installer (`curl … | sh`) — Linux installs a root systemd service + daily update
+  timer; macOS installs an `/Applications` app + root LaunchDaemon + updater. The daemon's
+  privilege (TUN/utun) is handled per-OS. All three keep themselves updated from the public repo.
+  New `wix/`, `packaging/`, `scripts/{build-msi,sign-artifacts,bundle-gtk-macos,package-macos}`,
+  top-level `install.sh`, and `docs/{windows,linux,macos}-packaging.md`.
 - **Member geolocation (Location).** Each member detail shows a **Location** ("City, State,
   Country", dropping whichever parts are unknown) under Public IP. The **originator** downloads the DB-IP City database (~60 MB, **CC BY 4.0**),
   resolves every member's advertised public IP, and **propagates the resolved strings** (signed
