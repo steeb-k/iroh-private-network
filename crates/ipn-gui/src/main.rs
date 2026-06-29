@@ -203,15 +203,26 @@ fn install_app_icon() {
     let Some(dirs) = directories::BaseDirs::new() else {
         return;
     };
-    // Windows: %LOCALAPPDATA%\ipn\icons ; Linux: ~/.cache/ipn/icons
+    // Windows: %LOCALAPPDATA%\ipn\icons ; Linux: ~/.cache/ipn/icons. Register the
+    // per-size "stacked" app icon so the window/taskbar icon is crisp at each size
+    // (the artist hand-tuned the small sizes). Always (over)write so a replaced
+    // asset takes effect next launch.
     let base = dirs.cache_dir().join("ipn").join("icons");
-    let apps = base.join("hicolor").join("512x512").join("apps");
-    if std::fs::create_dir_all(&apps).is_ok() {
-        // Always (over)write so a replaced icon takes effect on next launch.
-        let dest = apps.join(format!("{APP_ID}.png"));
-        let _ = std::fs::write(&dest, include_bytes!("../../../img/icon-spin.png"));
-        gtk::IconTheme::for_display(&display).add_search_path(&base);
+    let sizes: [(&str, &[u8]); 6] = [
+        ("16x16", include_bytes!("../../../img/icon-stacked-16.png")),
+        ("32x32", include_bytes!("../../../img/icon-stacked-32.png")),
+        ("64x64", include_bytes!("../../../img/icon-stacked-64.png")),
+        ("128x128", include_bytes!("../../../img/icon-stacked-128.png")),
+        ("256x256", include_bytes!("../../../img/icon-stacked-256.png")),
+        ("512x512", include_bytes!("../../../img/icon-stacked-512.png")),
+    ];
+    for (size, bytes) in sizes {
+        let apps = base.join("hicolor").join(size).join("apps");
+        if std::fs::create_dir_all(&apps).is_ok() {
+            let _ = std::fs::write(apps.join(format!("{APP_ID}.png")), bytes);
+        }
     }
+    gtk::IconTheme::for_display(&display).add_search_path(&base);
     gtk::Window::set_default_icon_name(APP_ID);
 }
 

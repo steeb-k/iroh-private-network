@@ -22,7 +22,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_SRC="$ROOT/packaging/macos"
 APP_ID="io.github.steeb_k.IPN"
 APP_NAME="Iroh Private Network.app"
-ICON_SRC="$ROOT/img/icon-spin.png"
 ARM_BREW="$(brew --prefix)"          # arm64 Homebrew (/opt/homebrew)
 X86_BREW="/usr/local"                # x86_64 Homebrew (Rosetta), if present
 SKIP_BUILD=0; [ "${1:-}" = "--skip-build" ] && SKIP_BUILD=1
@@ -108,13 +107,15 @@ fi
 # Info.plist (CFBundleVersion from Cargo).
 sed "s/__VERSION__/$VERSION/g" "$PKG_SRC/Info.plist" > "$CONTENTS/Info.plist"
 
-# AppIcon.icns from the master PNG.
+# AppIcon.icns from the per-size, hand-tuned app icons (slot:source-size). The
+# 1024 slot has no source, so it's upscaled from 512.
 ICONSET="$(mktemp -d)/AppIcon.iconset"; mkdir -p "$ICONSET"
-for spec in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x 128:128x128 256:128x128@2x \
-            256:256x256 512:256x256@2x 512:512x512 1024:512x512@2x; do
-  px="${spec%%:*}"; nm="${spec##*:}"
-  sips -z "$px" "$px" "$ICON_SRC" --out "$ICONSET/icon_$nm.png" >/dev/null 2>&1
+for spec in 16x16:16 16x16@2x:32 32x32:32 32x32@2x:64 128x128:128 128x128@2x:256 \
+            256x256:256 256x256@2x:512 512x512:512; do
+  nm="${spec%%:*}"; sz="${spec##*:}"
+  cp "$ROOT/img/icon-stacked-${sz}.png" "$ICONSET/icon_$nm.png"
 done
+sips -z 1024 1024 "$ROOT/img/icon-stacked-512.png" --out "$ICONSET/icon_512x512@2x.png" >/dev/null 2>&1
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/AppIcon.icns"
 rm -rf "$(dirname "$ICONSET")"
 echo "package-macos: wrote AppIcon.icns"

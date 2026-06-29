@@ -5,6 +5,9 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
 ## [Unreleased]
 ### Changed
+- **New app icon ("stacked").** The window/taskbar/launcher icon now uses hand-tuned per-size
+  art (16–512px) across all platforms: a multi-size Windows `.ico`, per-size Linux hicolor PNGs,
+  and a per-size macOS `.icns`. (The tray icon is unchanged.)
 - **Tray icon is now the monochrome icon**, auto-themed: shown white on dark trays and inverted to
   black on light ones (one asset, no separate black icon needed). The color icon stays bundled for
   a future Settings toggle.

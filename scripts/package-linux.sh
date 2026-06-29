@@ -19,8 +19,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_ID="io.github.steeb_k.IPN"
 PKG_SRC="$ROOT/packaging/linux"
-ICON_SRC="$ROOT/img/icon-spin.png"
-ICON_SIZES="16 22 24 32 48 64 128 256 512"
+# Per-size, hand-tuned app icons (img/icon-stacked-<sz>.png) installed as-is.
+ICON_SIZES="16 32 64 128 256 512"
 
 cd "$ROOT"
 VERSION="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
@@ -30,12 +30,6 @@ echo "package-linux: building $NAME"
 
 if [ "${1:-}" != "--skip-build" ]; then
   cargo build --release -p ipn-daemon -p ipn-gui -p ipn-cli
-fi
-
-# ImageMagick entrypoint (IM7 = magick, IM6 = convert).
-if command -v magick >/dev/null 2>&1; then IM="magick"
-elif command -v convert >/dev/null 2>&1; then IM="convert"
-else echo "package-linux: ImageMagick (magick/convert) is required for icon generation" >&2; exit 1
 fi
 
 STAGE="$ROOT/dist/$NAME"
@@ -62,11 +56,11 @@ install -m 0644 "$PKG_SRC/ipn-daemon.service"  "$STAGE/lib/systemd/system/ipn-da
 install -m 0644 "$PKG_SRC/ipn-update.service"  "$STAGE/lib/systemd/system/ipn-update.service"
 install -m 0644 "$PKG_SRC/ipn-update.timer"    "$STAGE/lib/systemd/system/ipn-update.timer"
 
-# hicolor icons, generated from the master PNG (pre-rendered so targets need no tools)
+# hicolor icons: the per-size, hand-tuned app icons, installed as-is.
 for sz in $ICON_SIZES; do
   dir="$STAGE/share/icons/hicolor/${sz}x${sz}/apps"
   mkdir -p "$dir"
-  "$IM" "$ICON_SRC" -resize "${sz}x${sz}" "$dir/$APP_ID.png"
+  install -m 0644 "$ROOT/img/icon-stacked-${sz}.png" "$dir/$APP_ID.png"
 done
 
 # Tarball
