@@ -369,7 +369,7 @@ fn build_ui(
     // like SEED — rather than sitting below it. A stack swaps which panel fills it. ---
     let split = adw::OverlaySplitView::new();
     split.set_collapsed(true);
-    split.set_sidebar_position(gtk::PackType::End);
+    split.set_sidebar_position(gtk::PackType::Start);
     split.set_show_sidebar(false);
     split.set_min_sidebar_width(300.0);
     split.set_max_sidebar_width(460.0);
@@ -399,7 +399,7 @@ fn build_ui(
             let split = split.clone();
             back.connect_clicked(move |_| split.set_show_sidebar(false));
         }
-        hb.pack_start(&back);
+        hb.pack_end(&back);
         tv.add_top_bar(&hb);
         let clamp = adw::Clamp::builder().maximum_size(520).child(content).build();
         let scr = gtk::ScrolledWindow::builder().child(&clamp).vexpand(true).build();
