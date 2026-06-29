@@ -3,7 +3,12 @@
 All notable changes to IPN. Format follows [Keep a Changelog](https://keepachangelog.com).
 Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
-## [Unreleased]
+## [0.1.2]
+### Changed
+- **Branding: the desktop app is "IPN Portal".** The main window header now reads **Iroh Private
+  Network** with **IPN Portal <version>** beneath it. "IPN Portal" is the product name for the GUI
+  in the UI and docs; `ipn-gui` stays as the codebase codename.
+
 ### Added
 - **The GUI restarts itself after an auto-update** so you're not left on the old version. The
   daemon now reports its app version over IPC; when it comes back newer, the GUI relaunches —

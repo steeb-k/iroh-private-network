@@ -34,7 +34,8 @@ devices find and authenticate each other directly (built on [iroh](https://www.i
 **Windows** — download `ipn-<version>-windows-x86_64.msi` from the
 [Releases](https://github.com/steeb-k/iroh-private-network/releases) page and run it (it's
 code-signed). It installs the app plus the background networking service and keeps itself
-updated. Launch **Iroh Private Network** from the Start menu.
+updated. Launch **Iroh Private Network** from the Start menu — the desktop app is called
+**IPN Portal**.
 
 **Linux & macOS** — one line in a terminal:
 

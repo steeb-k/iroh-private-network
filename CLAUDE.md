@@ -22,7 +22,7 @@ Rust workspace; each crate has one job. A feature usually flows through these la
 | `ipn-ipc` | Wire protocol (`IpcRequest`/`IpcResponse`/`IpcEvent`) + transport (named pipe / unix socket). Depends on `ipn-core` only for display DTOs. | expose a new engine action/event to clients |
 | `ipn-daemon` | Privileged process: owns the engine + TUN, serves IPC. Windows service + foreground modes. | route a new request to the engine |
 | `ipn-cli` | Headless IPC client (testing/scripting). | add a command for the new action |
-| `ipn-gui` | GTK4 + libadwaita app (`ipn`), unprivileged IPC client. | surface the feature in the UI |
+| `ipn-gui` | **IPN Portal** — the GTK4 + libadwaita app (binary `ipn`), unprivileged IPC client. The product name in UI/docs is "IPN Portal"; `ipn-gui` stays as the codebase codename. | surface the feature in the UI |
 
 Key module map in `ipn-core/src`: `engine.rs` (orchestration + public API), `roster.rs`
 (signed membership + role rules), `membership.rs` (roster over iroh-docs), `admission.rs`

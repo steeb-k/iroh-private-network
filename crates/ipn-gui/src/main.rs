@@ -346,14 +346,18 @@ fn build_ui(
     let (win_w, win_h) = load_window_size();
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("IPN")
+        .title("Iroh Private Network")
         .default_width(win_w)
         .default_height(win_h)
         .build();
 
     // --- main header (static branding; carries the window controls) ---
+    // "IPN Portal" is the product name for this GUI client (codename ipn-gui).
     let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new("IPN", "Iroh Private Network")));
+    header.set_title_widget(Some(&adw::WindowTitle::new(
+        "Iroh Private Network",
+        &format!("IPN Portal {}", env!("CARGO_PKG_VERSION")),
+    )));
 
     // "+" create/join — only shown when not in a network (toggled below).
     let add_btn = gtk::MenuButton::builder()

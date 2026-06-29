@@ -55,8 +55,9 @@ is the address your node actually observes for it (so a peer can't spoof its own
 - `ipn-daemon` — the **privileged** part: owns the iroh node + TUN and serves the GUI over IPC.
   Runs as a LocalSystem service on Windows, or with `CAP_NET_ADMIN` (via `setcap`) / systemd on
   Linux.
-- `ipn-gui` — the GTK4 + libadwaita desktop app (binary `ipn`). **Unprivileged** — it only
-  talks to the daemon, so day-to-day use never needs admin/root.
+- `ipn-gui` — **IPN Portal**, the GTK4 + libadwaita desktop app (binary `ipn`). **Unprivileged** —
+  it only talks to the daemon, so day-to-day use never needs admin/root. ("IPN Portal" is the
+  product name shown in the UI and docs; `ipn-gui` remains the codebase codename.)
 - `ipn-cli` — a small headless client (status / create / join / approve / remove / rotate …),
   handy for scripting and testing.
 
