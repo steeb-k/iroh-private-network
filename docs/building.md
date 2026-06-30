@@ -40,8 +40,22 @@ cargo test -p ipn-core --test delete_e2e   -- --ignored   # delete boots everyon
 cargo test -p ipn-core --test rotate_e2e   -- --ignored   # rotate locks out old-ticket devices
 ```
 
+## Android
+The Android app (`android/`, Kotlin/Compose over the `ipn-mobile` UniFFI facade) builds with the
+Android SDK + NDK. One-time setup: JDK 17, Android SDK 35, NDK r27c, `cargo install cargo-ndk`, and
+`rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android`.
+
+```sh
+cargo ndk -t arm64-v8a build -p ipn-core      # quick cross-compile check of the engine
+pwsh -File scripts/run-android.ps1            # build APK + install + launch on the emulator
+cd android && ./gradlew :app:assembleDebug    # or build the APK directly
+```
+Full detail (toolchain, ABIs, signing, the `VpnService` routing model) is in
+**[android-packaging.md](android-packaging.md)**.
+
 ## Packaging & releasing
 Building the installers and cutting a release has its own guides:
 **[releasing.md](releasing.md)** (the end-to-end flow) plus the per-platform detail in
 **[windows-packaging.md](windows-packaging.md)** (signed MSI + auto-updater),
-**[linux-packaging.md](linux-packaging.md)**, and **[macos-packaging.md](macos-packaging.md)**.
+**[linux-packaging.md](linux-packaging.md)**, **[macos-packaging.md](macos-packaging.md)**, and
+**[android-packaging.md](android-packaging.md)**.

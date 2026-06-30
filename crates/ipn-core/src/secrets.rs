@@ -17,13 +17,19 @@
 //! Set `NULLGATE_SECRETS_FILE_ONLY=1` to force the file backend (used by tests, where
 //! many in-process engines would otherwise collide on the same global keystore
 //! keys; with files they're isolated per data dir).
+//!
+//! **Android** has no OS keystore backend in the `keyring` crate, so it always uses
+//! the file backend — the data dir is app-private internal storage, so a `0600`
+//! hex key file there is not world-readable. (Android Keystore is a later hardening.)
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 
+#[cfg(not(target_os = "android"))]
 const SERVICE: &str = "nullgate";
 
+#[cfg(not(target_os = "android"))]
 fn file_only() -> bool {
     std::env::var_os("NULLGATE_SECRETS_FILE_ONLY").is_some()
 }
@@ -44,6 +50,7 @@ pub fn store(data_dir: &Path, name: &str, bytes: &[u8; 32]) -> Result<()> {
     let _ = std::fs::create_dir_all(secrets_dir(data_dir));
     let hex = data_encoding::HEXLOWER.encode(bytes);
 
+    #[cfg(not(target_os = "android"))]
     if !file_only() {
         if let Ok(entry) = keyring::Entry::new(SERVICE, name) {
             if entry.set_password(&hex).is_ok() {
@@ -61,6 +68,7 @@ pub fn store(data_dir: &Path, name: &str, bytes: &[u8; 32]) -> Result<()> {
 
 /// Load the secret under `name`, or `None` if it was never stored.
 pub fn load(data_dir: &Path, name: &str) -> Result<Option<[u8; 32]>> {
+    #[cfg(not(target_os = "android"))]
     if marker_file(data_dir, name).exists() {
         // It's keystore-backed: require the keystore (don't fall back / regenerate).
         let entry = keyring::Entry::new(SERVICE, name).context("open keystore entry")?;
@@ -81,6 +89,7 @@ pub fn load(data_dir: &Path, name: &str) -> Result<Option<[u8; 32]>> {
 
 /// Remove a secret from both the keystore and the file fallback.
 pub fn delete(data_dir: &Path, name: &str) {
+    #[cfg(not(target_os = "android"))]
     if let Ok(entry) = keyring::Entry::new(SERVICE, name) {
         let _ = entry.delete_credential();
     }

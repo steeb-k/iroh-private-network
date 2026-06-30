@@ -23,6 +23,15 @@ Rust workspace; each crate has one job. A feature usually flows through these la
 | `ipn-daemon` | Privileged process: owns the engine + TUN, serves IPC. Windows service + foreground modes. | route a new request to the engine |
 | `ipn-cli` | Headless IPC client (testing/scripting). | add a command for the new action |
 | `ipn-gui` | **Nullgate** — the GTK4 + libadwaita app (binary `nullgate`), unprivileged IPC client. The product name in UI/docs is "Nullgate"; `ipn-gui` stays as the codebase codename. | surface the feature in the UI |
+| `ipn-mobile` | UniFFI facade (`cdylib` `ipn_mobile`) wrapping `ipn-core` in-process for **Android** — no daemon/IPC. Exposes `MobileEngine` + an `EventListener` callback; the engine drives the `VpnService` TUN via fd injection. | expose an engine action/event to the Android app |
+
+The **Android app** lives in `android/` (Kotlin/Compose over `ipn-mobile`; binary product name
+"Nullgate", appId `io.github.steeb_k.nullgate`). It runs the engine in-process inside a foreground
+`VpnService` and routes a split tunnel for `10.99.0.0/24`. See `docs/android-packaging.md`. On
+Android, `ipn-core` compiles with `keyring`/geo gated out (file-backed secrets, no geolocation) and
+takes its display name from `set_device_name_override` (OS hostname is meaningless there); routing
+uses `RealTun::from_fd` over the `VpnService` fd plus `Engine::{assigned_ip, attach_tun_fd,
+detach_tun}` and the `EngineEvent::Tun{Setup,Teardown}Required` events.
 
 Key module map in `ipn-core/src`: `engine.rs` (orchestration + public API), `roster.rs`
 (signed membership `ipn-roster-v2` — roles Peer/Controller, invites, static-IP assignment, role
@@ -51,8 +60,13 @@ cargo test -p ipn-core             # unit tests (fast, no network)
 cargo test -p ipn-core --test engine_e2e -- --ignored
 cargo test -p ipn-core --test delete_e2e -- --ignored
 cargo test -p ipn-core --test rotate_e2e -- --ignored
+
+# Android (needs JDK 17 + Android SDK 35 + NDK r27c + cargo-ndk + the 3 android rust targets):
+cargo ndk -t arm64-v8a build -p ipn-core      # quick cross-compile sanity check
+pwsh -File scripts/run-android.ps1            # build APK + install + launch (emulator AVD seed_api35)
+#   or: cd android && ./gradlew :app:assembleDebug   ; see docs/android-packaging.md
 ```
-Packaging + releases: see `docs/releasing.md` (+ `windows-/linux-/macos-packaging.md`). From
+Packaging + releases: see `docs/releasing.md` (+ `windows-/linux-/macos-/android-packaging.md`). From
 0.1.0 we ship real installers with auto-update: a **code-signed Windows MSI** (`scripts/
 build-msi.ps1`, Azure Trusted Signing), a **Linux** system-service tarball (`scripts/
 package-linux.sh` + `packaging/linux/nullgatectl`), and a **macOS** universal `.app` tarball

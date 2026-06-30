@@ -77,8 +77,22 @@ per packet, never behind the async state mutex), persisted in `device_prefs.cbor
   product name shown in the UI and docs; `ipn-gui` remains the codebase codename.)
 - `ipn-cli` — a small headless client (status / create / join / approve / remove / rotate …),
   handy for scripting and testing.
+- `ipn-mobile` — the **Android** facade: a UniFFI `cdylib` (`ipn_mobile`) that runs `ipn-core`
+  **in-process** behind a `MobileEngine` object + `EventListener` callback. No daemon, no IPC.
 
 ### Why the daemon/GUI split
 Creating the virtual network interface needs elevated privilege; a GUI does not. Splitting them
 means the privileged work is isolated in a tiny background service while the app you click runs
 as you — so you elevate once at install time, never per launch.
+
+### Android (no daemon; VpnService)
+Android has no separate-privileged-process model and won't let an app open a TUN directly, so the
+desktop daemon/GUI split doesn't apply. Instead the Kotlin/Compose app (`android/`) runs the same
+`ipn-core` engine **in its own process** via `ipn-mobile`, inside a foreground `VpnService`. The
+control flow is inverted versus desktop: the engine can't open the TUN, so when its virtual IP is
+known it emits `EngineEvent::TunSetupRequired`; the app stands up the `VpnService`
+(`addAddress(10.99.0.x/24)`, `addRoute(10.99.0.0/24)`) and passes the resulting fd back to
+`Engine::attach_tun_fd`, which adopts it (`tun_device::RealTun::from_fd`) and runs the exact same
+outbound/inbound pump as desktop. It's a **split tunnel** — only the `10.99.0.0/24` is routed — so
+the phone's normal traffic (and iroh's own relay/peer traffic to public IPs) bypasses it, which is
+also why no `VpnService.protect()` is needed. See `docs/android-packaging.md`.

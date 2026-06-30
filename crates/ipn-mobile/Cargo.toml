@@ -1,0 +1,56 @@
+[package]
+name = "ipn-mobile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Nullgate mobile facade: a flat, UniFFI-friendly API over ipn-core for Android"
+
+# `cdylib` is the `.so` loaded by the Android app via System.loadLibrary; `lib`
+# keeps the crate usable as a normal Rust dependency (host tests, the
+# uniffi-bindgen helper bin) and lets the proc-macro scaffolding compile.
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "ipn_mobile"
+
+[dependencies]
+ipn-core = { path = "../ipn-core" }
+
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+uniffi = { version = "0.28", features = ["tokio"] }
+
+# Route `tracing` to Logcat on Android so engine logs are visible via `adb
+# logcat`. Pulled in only for the android target.
+[target.'cfg(target_os = "android")'.dependencies]
+tracing-subscriber = { workspace = true }
+paranoid-android = "0.2"
+# iroh's relay TLS uses rustls-platform-verifier, which on Android must be
+# initialized with the app's JVM Context before any TLS handshake. We depend on
+# it directly (same 0.7 as iroh's tree, so it's the one global registration) and
+# expose a JNI entry point that the Kotlin side calls at startup. `jni` is the
+# 0.22 line rustls-platform-verifier itself uses, so the types unify.
+rustls-platform-verifier = "0.7"
+jni = { version = "0.22", default-features = false }
+# iroh's DNS discovery (hickory-resolver) reads Android's network/DNS config via
+# `ndk_context::android_context()`, which panics "android context was not
+# initialized" until the JVM Context is registered. We initialize it from the
+# same JNI entry point as the TLS verifier.
+ndk-context = "0.1"
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }
+
+# A tiny bin that runs UniFFI's binding generator (proc-macro mode reads the
+# compiled library's metadata). Invoked by the Gradle build to emit Kotlin.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]

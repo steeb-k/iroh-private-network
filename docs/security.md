@@ -62,6 +62,21 @@ unavailable the daemon errors clearly rather than regenerating identity (which w
 evict the device). `network.cbor` holds only non-secret fields (name, subnet, originator pubkey).
 This assumes one daemon instance per machine/user account.
 
+On **Android** there is no OS keystore backend (the `keyring` crate has none), so secrets are kept
+in the `0600` file fallback under the app's **private internal storage** (`Context.filesDir`),
+which is not readable by other apps on a non-rooted device. Android Keystore-backed encryption of
+that file is a possible future hardening.
+
+## Device name is self-asserted (NodeId is the anchor)
+The display name members see (the desktop OS hostname; on Android an auto-derived
+`"<Manufacturer> <Model> (<suffix>)"`) is written by the client into its own roster `Add` and
+presence heartbeats — it is **not** cryptographically bound to identity, on **any** platform, and a
+modified client could claim any name. The only non-spoofable identifier is the **NodeId** (the
+device's ed25519 public key), which the UI shows and which all admission/roster signatures are
+bound to. Android makes the name non-editable in the UI (the hardware serial is unreachable to
+normal apps since API 29), which prevents casual spoofing but is not a security boundary — treat
+the NodeId, verified via the emoji SAS at join time, as the identity.
+
 ## Geolocation
 Member "Location" (City, Country) is resolved **only by the originator**, which downloads the
 DB-IP City database (CC BY 4.0) and looks up each member's advertised public IP **locally** — no

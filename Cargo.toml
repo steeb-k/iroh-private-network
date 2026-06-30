@@ -6,6 +6,7 @@ members = [
     "crates/ipn-daemon",
     "crates/ipn-cli",
     "crates/ipn-gui",
+    "crates/ipn-mobile",
 ]
 
 [workspace.package]

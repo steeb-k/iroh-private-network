@@ -37,21 +37,25 @@ subtle.workspace = true
 rand.workspace = true
 
 # platform / fs
-directories.workspace = true
 hostname.workspace = true
+# TUN: tun-rs on desktop (DeviceBuilder) and on Android (AsyncDevice::from_fd over
+# the VpnService fd) — same async substrate, so it stays a common dependency.
 tun-rs.workspace = true
-keyring.workspace = true
-
-# geolocation (originator only): read the DB-IP City MMDB + download it
-maxminddb.workspace = true
-serde_json.workspace = true
-rust_iso3166.workspace = true
-ureq.workspace = true
 
 # diagnostics
 tracing.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
+
+# Desktop-only: the OS keystore has no Android backend (secrets fall back to a
+# file in app-private storage there), and the originator-only geolocation stack
+# (MMDB read + HTTP download) is not shipped on mobile.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring.workspace = true
+maxminddb.workspace = true
+serde_json.workspace = true
+rust_iso3166.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

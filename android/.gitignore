@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+app/build/
+app/src/main/jniLibs/
+app/src/main/java/uniffi/
+*.log
+logcat.txt
+# Release signing material — NEVER commit. Back these up offline (a lost signing
+# key permanently blocks in-place app updates). See docs/android-packaging.md.
+keystore/
+keystore.properties
+# Throwaway test/debug screenshots captured at the android/ root (not resources).
+/*.png
+.idea/
+*.iml
+.cxx/

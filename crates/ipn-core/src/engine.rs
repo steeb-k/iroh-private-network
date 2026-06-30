@@ -193,6 +193,14 @@ pub enum EngineEvent {
         hostname: String,
         sas: Vec<String>,
     },
+    /// **Android only:** routing needs the platform TUN. Our virtual `ip` is known,
+    /// so the app should bring up its `VpnService` with this address/MTU and hand
+    /// the resulting fd back via [`Engine::attach_tun_fd`]. Never emitted on desktop
+    /// (which opens its own TUN), so desktop clients can ignore it.
+    TunSetupRequired { ip: String, mtu: u32 },
+    /// **Android only:** routing is going away (went offline / left the network) —
+    /// the app should tear down its `VpnService`. Never emitted on desktop.
+    TunTeardownRequired,
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +290,10 @@ struct Inner {
     tun: StdRwLock<Option<Arc<RealTun>>>,
     /// Whether we've already attempted to bring up the TUN (open it once).
     tun_attempted: AtomicBool,
+    /// Our roster-assigned virtual IP, once known. On Android the app reads this
+    /// (via [`Engine::assigned_ip`]) to build the `VpnService` before consent; the
+    /// engine can't open the TUN itself there.
+    assigned_ip: StdRwLock<Option<Ipv4Addr>>,
     /// This device blocks inbound remote access (one-way; outbound still works).
     /// Read lock-free on the per-packet inbound path, so it lives on `Inner`.
     remote_access_disabled: AtomicBool,
@@ -307,8 +319,11 @@ struct Inner {
     /// Last time (ms) we flushed the persisted last-seen map (throttle).
     last_seen_saved: AtomicU64,
     /// Geolocation DB, loaded only on the originator (it resolves + propagates).
+    /// Desktop-only — the geo stack isn't shipped on Android.
+    #[cfg(not(target_os = "android"))]
     geo: StdRwLock<Option<crate::geo::GeoDb>>,
     /// Guards against launching multiple concurrent geo-DB downloads.
+    #[cfg(not(target_os = "android"))]
     geo_downloading: AtomicBool,
 }
 
@@ -360,6 +375,7 @@ impl Engine {
             routes: StdRwLock::new(RouteTable::default()),
             tun: StdRwLock::new(None),
             tun_attempted: AtomicBool::new(false),
+            assigned_ip: StdRwLock::new(None),
             remote_access_disabled: AtomicBool::new(prefs.remote_access_disabled),
             hidden: AtomicBool::new(prefs.hidden),
             conntrack: Conntrack::default(),
@@ -369,7 +385,9 @@ impl Engine {
             was_member: AtomicBool::new(false),
             protocol_version: AtomicU32::new(admission::PROTOCOL_VERSION),
             last_seen_saved: AtomicU64::new(0),
+            #[cfg(not(target_os = "android"))]
             geo: StdRwLock::new(None),
+            #[cfg(not(target_os = "android"))]
             geo_downloading: AtomicBool::new(false),
         });
 
@@ -413,6 +431,46 @@ impl Engine {
 
     pub fn self_node_id_hex(&self) -> String {
         data_encoding::HEXLOWER.encode(&self.inner.my_id)
+    }
+
+    /// Our roster-assigned virtual IP (`10.99.0.x`), once known — `None` before a
+    /// network is active. On Android the app reads this to build its `VpnService`
+    /// after receiving [`EngineEvent::TunSetupRequired`].
+    pub fn assigned_ip(&self) -> Option<String> {
+        self.inner
+            .assigned_ip
+            .read()
+            .unwrap()
+            .map(|ip| ip.to_string())
+    }
+
+    /// **Android only:** adopt the TUN file descriptor produced by the app's
+    /// `VpnService` (`ParcelFileDescriptor.detachFd()`) and start routing. Takes
+    /// ownership of `fd` (closed when routing tears down). Idempotent: replaces any
+    /// existing device and pump. This is the Android equivalent of the desktop's
+    /// internal `RealTun::open`.
+    #[cfg(target_os = "android")]
+    pub fn attach_tun_fd(&self, fd: i32) -> Result<()> {
+        // SAFETY: contract documented on the facade — `fd` is an owned, open fd
+        // surrendered by Kotlin via detachFd() and never touched again there.
+        let tun = unsafe { RealTun::from_fd(fd, TUN_MTU) }.context("adopt VpnService tun fd")?;
+        let tun = Arc::new(tun);
+        // Mark attempted so the maintenance tick won't try to re-enable.
+        self.inner.tun_attempted.store(true, Ordering::SeqCst);
+        *self.inner.tun.write().unwrap() = Some(tun.clone());
+        tracing::info!("routing enabled: adopted VpnService tun fd (mtu {TUN_MTU})");
+        spawn_tun_pump(&self.inner, tun);
+        let _ = self.inner.events.send(EngineEvent::Changed);
+        Ok(())
+    }
+
+    /// **Android only:** drop the TUN (VPN revoked / stopping) and stop the pump.
+    /// Resets the attempt latch so a later re-consent can re-attach.
+    #[cfg(target_os = "android")]
+    pub fn detach_tun(&self) {
+        *self.inner.tun.write().unwrap() = None; // drop closes the fd
+        self.inner.tun_attempted.store(false, Ordering::SeqCst);
+        let _ = self.inner.events.send(EngineEvent::Changed);
     }
 
     /// Number of live mesh connections (used by tests to verify no ghost
@@ -1338,6 +1396,11 @@ async fn soft_disconnect(inner: &Arc<Inner>) {
     }
     *inner.tun.write().unwrap() = None;
     inner.tun_attempted.store(false, Ordering::SeqCst);
+    *inner.assigned_ip.write().unwrap() = None;
+    // Android: ask the app to tear down its VpnService (desktop opened its own TUN,
+    // which the `tun.write() = None` above already dropped).
+    #[cfg(target_os = "android")]
+    let _ = inner.events.send(EngineEvent::TunTeardownRequired);
     inner.was_member.store(false, Ordering::SeqCst);
     inner.conntrack.clear();
     *inner.routes.write().unwrap() = RouteTable::default();
@@ -1502,7 +1565,9 @@ async fn tick(inner: &Arc<Inner>) -> Result<()> {
         let _ = sender.broadcast(Bytes::from(buf)).await;
 
         // Originator only: resolve each member's public IP to a location and
-        // propagate a signed map so members can show it without the DB.
+        // propagate a signed map so members can show it without the DB. (Not on
+        // Android — the geo DB stack isn't shipped there; see `crate::geo`.)
+        #[cfg(not(target_os = "android"))]
         if cfg.originator_secret.is_some() {
             // Gather (node_id, public_ip) for everyone (under the async lock).
             let pairs: Vec<(Id, Option<String>)> = {
@@ -1554,6 +1619,7 @@ async fn tick(inner: &Arc<Inner>) -> Result<()> {
     }
 
     // Originator: keep the geo DB present + fresh (downloads in the background).
+    #[cfg(not(target_os = "android"))]
     ensure_geo(inner).await;
 
     // Refresh observed-address / direct info for live peers.
@@ -1929,9 +1995,15 @@ async fn register_mesh(inner: &Arc<Inner>, peer: Id, conn: Connection) {
     });
 }
 
-/// Bring up the OS TUN once, if we know our virtual IP. Best-effort: if it fails
-/// (no elevation, missing wintun.dll, …) we log and keep running without routing,
-/// so membership + presence still work. Spawns the outbound read loop on success.
+/// Bring up routing once we know our virtual IP.
+///
+/// On **desktop** this opens the OS TUN directly (best-effort: if it fails — no
+/// elevation, missing wintun.dll, … — we log and keep running without routing, so
+/// membership + presence still work) and spawns the outbound pump.
+///
+/// On **Android** we can't open a TUN ourselves — only `VpnService` can — so we
+/// record the assigned IP and emit [`EngineEvent::TunSetupRequired`]; the app then
+/// establishes the interface and calls [`Engine::attach_tun_fd`] with the fd.
 async fn enable_tun(inner: &Arc<Inner>, ip: Ipv4Addr) {
     // Escape hatch for tests/CI (and headless runs where a TUN is undesirable).
     if std::env::var_os("NULLGATE_DISABLE_TUN").is_some() {
@@ -1940,45 +2012,16 @@ async fn enable_tun(inner: &Arc<Inner>, ip: Ipv4Addr) {
     if inner.tun_attempted.swap(true, Ordering::SeqCst) {
         return; // only attempt once
     }
+    *inner.assigned_ip.write().unwrap() = Some(ip);
+
+    #[cfg(not(target_os = "android"))]
     match RealTun::open(ip, 24, TUN_MTU) {
         Ok(tun) => {
             let tun = Arc::new(tun);
             *inner.tun.write().unwrap() = Some(tun.clone());
             tracing::info!("routing enabled: TUN up at {ip}/24 (mtu {TUN_MTU})");
+            spawn_tun_pump(inner, tun);
             let _ = inner.events.send(EngineEvent::Changed);
-            // Outbound data plane: TUN packet → dst IP → peer → QUIC datagram.
-            let inner2 = inner.clone();
-            let h = tokio::spawn(async move {
-                let mut buf = vec![0u8; 65535];
-                loop {
-                    match tun.recv(&mut buf).await {
-                        Ok(n) => {
-                            let pkt = &mut buf[..n];
-                            let Some(dst) = dst_ipv4(pkt) else { continue };
-                            // Track this outbound flow so the one-way block lets its
-                            // return traffic back in (record before the MSS rewrite).
-                            inner2
-                                .conntrack
-                                .record_outbound(pkt, inner2.coarse_now.load(Ordering::Relaxed));
-                            // Clamp TCP MSS so flows stay within the tunnel.
-                            clamp_tcp_mss(pkt, TUN_MSS);
-                            let peer = inner2.routes.read().unwrap().lookup(&dst);
-                            let Some(peer) = peer else { continue };
-                            let conn = inner2.conns.read().unwrap().get(&peer).cloned();
-                            if let Some(conn) = conn {
-                                if let Err(e) = conn.send_datagram(Bytes::copy_from_slice(pkt)) {
-                                    tracing::trace!("dropped {}-byte packet: {e}", pkt.len());
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            tracing::debug!("tun recv ended: {e}");
-                            break;
-                        }
-                    }
-                }
-            });
-            inner.net_tasks.lock().unwrap().push(h.abort_handle());
         }
         Err(e) => {
             tracing::warn!(
@@ -1987,6 +2030,53 @@ async fn enable_tun(inner: &Arc<Inner>, ip: Ipv4Addr) {
             );
         }
     }
+
+    #[cfg(target_os = "android")]
+    {
+        tracing::info!("routing pending: ask the app to bring up VpnService at {ip}/24");
+        let _ = inner.events.send(EngineEvent::TunSetupRequired {
+            ip: ip.to_string(),
+            mtu: TUN_MTU as u32,
+        });
+    }
+}
+
+/// Spawn the outbound data plane: TUN packet → dst IP → peer → QUIC datagram.
+/// Shared by the desktop open path and the Android fd-attach path; the abort
+/// handle is tracked in `net_tasks` so leaving/disconnecting stops it cleanly.
+fn spawn_tun_pump(inner: &Arc<Inner>, tun: Arc<RealTun>) {
+    let inner2 = inner.clone();
+    let h = tokio::spawn(async move {
+        let mut buf = vec![0u8; 65535];
+        loop {
+            match tun.recv(&mut buf).await {
+                Ok(n) => {
+                    let pkt = &mut buf[..n];
+                    let Some(dst) = dst_ipv4(pkt) else { continue };
+                    // Track this outbound flow so the one-way block lets its
+                    // return traffic back in (record before the MSS rewrite).
+                    inner2
+                        .conntrack
+                        .record_outbound(pkt, inner2.coarse_now.load(Ordering::Relaxed));
+                    // Clamp TCP MSS so flows stay within the tunnel.
+                    clamp_tcp_mss(pkt, TUN_MSS);
+                    let peer = inner2.routes.read().unwrap().lookup(&dst);
+                    let Some(peer) = peer else { continue };
+                    let conn = inner2.conns.read().unwrap().get(&peer).cloned();
+                    if let Some(conn) = conn {
+                        if let Err(e) = conn.send_datagram(Bytes::copy_from_slice(pkt)) {
+                            tracing::trace!("dropped {}-byte packet: {e}", pkt.len());
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("tun recv ended: {e}");
+                    break;
+                }
+            }
+        }
+    });
+    inner.net_tasks.lock().unwrap().push(h.abort_handle());
 }
 
 #[derive(Default)]
@@ -2048,6 +2138,7 @@ async fn conn_info(inner: &Arc<Inner>, peer: &Id) -> ConnInfo {
 
 /// Originator-only: make sure the geo DB is loaded, and (re)download it in the
 /// background if it's missing or older than two weeks. No-op for non-originators.
+#[cfg(not(target_os = "android"))]
 async fn ensure_geo(inner: &Arc<Inner>) {
     let is_orig = {
         let st = inner.state.lock().await;
@@ -2101,6 +2192,7 @@ async fn ensure_geo(inner: &Arc<Inner>) {
 }
 
 /// Whether a file is missing or older than `secs` seconds (best-effort).
+#[cfg(not(target_os = "android"))]
 fn file_older_than(path: &Path, secs: u64) -> bool {
     match std::fs::metadata(path).and_then(|m| m.modified()) {
         Ok(modified) => modified.elapsed().map(|d| d.as_secs() > secs).unwrap_or(true),
@@ -2197,9 +2289,14 @@ fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(CONFIG_FILE)
 }
 
-/// This device's **actual current** OS hostname, read fresh each call so it always
-/// reflects the real hostname (never cached, never member-editable).
+/// This device's shared display name. Normally the **actual current** OS hostname,
+/// read fresh each call so it always reflects the real hostname (never cached,
+/// never member-editable). If a process-wide override was set (Android, where the
+/// OS hostname is meaningless), that wins — see [`crate::set_device_name_override`].
 fn current_hostname() -> String {
+    if let Some(name) = crate::device_name_override() {
+        return name;
+    }
     hostname::get()
         .ok()
         .and_then(|h| h.into_string().ok())

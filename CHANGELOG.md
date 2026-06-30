@@ -3,6 +3,24 @@
 All notable changes to Nullgate. Format follows [Keep a Changelog](https://keepachangelog.com).
 Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
+## [Unreleased]
+### Added
+- **Android app (initial).** Nullgate now builds and runs on Android: a Kotlin/Compose UI over a
+  new `ipn-mobile` UniFFI facade that runs `ipn-core` in-process inside a foreground service — no
+  separate daemon. Full feature parity with the desktop app (create/join, roster with live
+  presence, emoji-SAS join approval, tickets incl. single-use + controller, member roles, freeze/
+  rotate/delete, originator-key export/import, per-member nicknames/notes, hide / disable-remote-
+  access, activity log). Packet routing is real: the app drives Android's `VpnService` and feeds
+  its TUN file descriptor into the engine (`Engine::attach_tun_fd`) over a split tunnel
+  (`10.99.0.0/24` only, so normal phone traffic is unaffected). Join tickets can be pasted or
+  scanned/shown as QR. Build/run via `scripts/run-android.ps1`; see `docs/android-packaging.md`.
+- **`ipn-core` Android support.** `tun_device::RealTun::from_fd` adopts a `VpnService` fd;
+  `EngineEvent::TunSetupRequired` / `TunTeardownRequired` coordinate VPN bring-up/teardown;
+  `Engine::{assigned_ip, attach_tun_fd, detach_tun}` expose the fd-injection path;
+  `set_device_name_override` supplies a stable display name (the Android OS hostname is
+  meaningless). On Android secrets are file-backed (no OS keystore) and the geolocation stack is
+  not compiled in.
+
 ## [0.1.8]
 ### Fixed
 - **Per-member notes: styling and live updates.** The Notes editor is now a rounded card inset

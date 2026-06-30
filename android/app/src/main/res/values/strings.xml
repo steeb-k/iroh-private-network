@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Nullgate</string>
+    <string name="notif_channel_net">Network service</string>
+    <string name="notif_title">Nullgate is running</string>
+</resources>

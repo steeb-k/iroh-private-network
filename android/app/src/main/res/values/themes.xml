@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Compose draws the real UI; this base theme just configures the splash /
+         window background and status-bar handling before Compose takes over. -->
+    <style name="Theme.Nullgate" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <!-- System-bar colors/icon contrast are handled at runtime by
+             enableEdgeToEdge() (auto light/dark). -->
+    </style>
+</resources>
