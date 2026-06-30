@@ -58,6 +58,11 @@ const MESH_ALPN: &[u8] = b"ipn/mesh/0";
 const JOIN_ALPN: &[u8] = b"ipn/join/0";
 const CONFIG_FILE: &str = "network.cbor";
 
+/// How often (ms) to re-seed the roster-doc live-sync gossip swarm with all
+/// current members as a self-heal, independent of membership changes. Short
+/// enough that new members / removals / audit entries appear within a few seconds.
+const DOC_RESYNC_MS: u64 = 8_000;
+
 // ---------------------------------------------------------------------------
 // Persisted configuration
 // ---------------------------------------------------------------------------
@@ -294,6 +299,14 @@ struct Inner {
     /// (via [`Engine::assigned_ip`]) to build the `VpnService` before consent; the
     /// engine can't open the TUN itself there.
     assigned_ip: StdRwLock<Option<Ipv4Addr>>,
+    /// Members we've currently seeded the roster-doc live-sync gossip swarm with,
+    /// so we only re-`start_sync` when the set changes (plus a periodic self-heal).
+    /// Without keeping this swarm seeded with *all* members, a later Add/Remove/role
+    /// change — and the audit log derived from them — only reaches members with a
+    /// healthy direct link and is otherwise missed until a restart re-resumes sync.
+    doc_sync_set: StdMutex<std::collections::BTreeSet<Id>>,
+    /// Last time (ms) we (re)seeded the roster-doc live-sync swarm.
+    last_doc_sync: AtomicU64,
     /// This device blocks inbound remote access (one-way; outbound still works).
     /// Read lock-free on the per-packet inbound path, so it lives on `Inner`.
     remote_access_disabled: AtomicBool,
@@ -376,6 +389,8 @@ impl Engine {
             tun: StdRwLock::new(None),
             tun_attempted: AtomicBool::new(false),
             assigned_ip: StdRwLock::new(None),
+            doc_sync_set: StdMutex::new(std::collections::BTreeSet::new()),
+            last_doc_sync: AtomicU64::new(0),
             remote_access_disabled: AtomicBool::new(prefs.remote_access_disabled),
             hidden: AtomicBool::new(prefs.hidden),
             conntrack: Conntrack::default(),
@@ -1397,6 +1412,8 @@ async fn soft_disconnect(inner: &Arc<Inner>) {
     *inner.tun.write().unwrap() = None;
     inner.tun_attempted.store(false, Ordering::SeqCst);
     *inner.assigned_ip.write().unwrap() = None;
+    inner.doc_sync_set.lock().unwrap().clear();
+    inner.last_doc_sync.store(0, Ordering::SeqCst);
     // Android: ask the app to tear down its VpnService (desktop opened its own TUN,
     // which the `tun.write() = None` above already dropped).
     #[cfg(target_os = "android")]
@@ -1525,6 +1542,44 @@ async fn tick(inner: &Arc<Inner>) -> Result<()> {
                 tracing::debug!("dial {} failed: {e:#}", short(&peer));
             }
         });
+    }
+
+    // Keep the roster-doc's live-sync gossip swarm seeded with **all** current
+    // members, not just the one peer we synced with at join time. iroh-docs only
+    // broadcasts document updates within this swarm, so without re-seeding it a
+    // later Add/Remove/role change (and the activity log derived from them, and a
+    // device's own removal) propagates only to members with a healthy direct link
+    // and is otherwise missed until a restart re-resumes sync. Re-seed whenever the
+    // member set changes, and periodically as a self-heal (which also lets a newly
+    // added member's entry reach everyone by keeping the swarm well-connected).
+    {
+        let member_ids: std::collections::BTreeSet<Id> = roster
+            .members()
+            .map(|(id, _)| *id)
+            .filter(|id| *id != inner.my_id)
+            .collect();
+        let now = now_ms();
+        let changed = {
+            let mut last = inner.doc_sync_set.lock().unwrap();
+            if *last != member_ids {
+                *last = member_ids.clone();
+                true
+            } else {
+                false
+            }
+        };
+        let due = now.saturating_sub(inner.last_doc_sync.load(Ordering::Relaxed)) > DOC_RESYNC_MS;
+        if !member_ids.is_empty() && (changed || due) {
+            inner.last_doc_sync.store(now, Ordering::Relaxed);
+            let addrs: Vec<EndpointAddr> =
+                member_ids.iter().filter_map(|id| bootstrap_addr(id).ok()).collect();
+            let doc = doc.clone();
+            tokio::spawn(async move {
+                if let Err(e) = doc.start_sync(addrs).await {
+                    tracing::debug!("roster-doc re-sync failed: {e:#}");
+                }
+            });
+        }
     }
 
     // Broadcast presence + grow the gossip mesh toward all members.

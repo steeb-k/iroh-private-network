@@ -21,6 +21,26 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   meaningless). On Android secrets are file-backed (no OS keystore) and the geolocation stack is
   not compiled in.
 
+### Fixed
+- **Live roster sync: new members, removals, and the activity log now appear without a restart.**
+  The roster-doc's iroh-docs live-sync gossip swarm was only ever seeded pairwise at join time
+  (joiner↔bootstrap, approver→joiner) and never refreshed, so a later Add/Remove/role change — and
+  the activity log derived from them, and a device learning it was *itself* removed — only reached
+  members with a healthy direct link and was otherwise missed until the app was fully quit and
+  restarted. The maintenance tick now re-seeds the swarm with **all** current members (on change
+  and every ~8s), so changes propagate within seconds. Affects desktop and Android.
+- **Android: enabling routing failed with "there is no reactor running…".** The facade's
+  `attach_tun`/`detach_tun` ran outside the tokio runtime, but adopting the `VpnService` fd
+  registers it with the reactor (`AsyncFd`) and spawns the pump; they now run inside `block_on`.
+- **Android: the joiner's emoji verification screen now appears before approval**, not after. The
+  SAS is emitted during the handshake (before the network activates), but the UI only rendered it
+  inside the member list, which doesn't exist until the join is accepted; it's now a top-level
+  overlay shown while joining.
+- **Windows: pin the GLib program/application name to "Nullgate"** so the running GTK process can't
+  surface under the crate codename. (The executable already embeds `FileDescription`/`ProductName`
+  = "Nullgate"; if Task Manager still shows the old name, Windows is caching stale version info for
+  that exe path.)
+
 ## [0.1.8]
 ### Fixed
 - **Per-member notes: styling and live updates.** The Notes editor is now a rounded card inset

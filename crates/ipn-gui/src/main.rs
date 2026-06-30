@@ -313,6 +313,13 @@ fn main() -> glib::ExitCode {
     };
     net.subscribe_loop();
 
+    // Pin the GLib program/application name to the product brand. GTK otherwise
+    // derives these from argv[0] (the binary name), and on Windows the program
+    // name feeds the window-class / taskbar identity — so without this the running
+    // process can surface under the crate codename instead of "Nullgate".
+    glib::set_prgname(Some("Nullgate"));
+    glib::set_application_name("Nullgate");
+
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_activate(move |app| build_ui(app, net.clone(), rx.clone(), start_minimized));
     let empty: [&str; 0] = [];

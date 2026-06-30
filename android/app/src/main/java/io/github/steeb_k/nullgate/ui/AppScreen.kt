@@ -120,15 +120,20 @@ fun AppScreen(
                 NetworkBody(
                     status = st,
                     pendingJoins = pendingJoins,
-                    joinSas = joinSas,
                     needsConsent = needsConsent,
                     onEnableRouting = onEnableRouting,
                     onToggleOnline = { online -> runAction { EngineHolder.setOnline(online) } },
                     onMember = { dialog = Dialog.MemberDetail(it) },
                     onApprove = { pj -> runAction { EngineHolder.approveJoin(pj.nodeId) } },
                     onDeny = { pj -> runAction { EngineHolder.denyJoin(pj.nodeId) } },
-                    onDismissJoinSas = { EngineHolder.clearJoinSas() },
                 )
+            }
+
+            // While *we* are joining, the engine emits the SAS before the other side
+            // approves — but the network isn't active yet (status is null), so show
+            // it as a top-level overlay rather than inside the (absent) member list.
+            joinSas?.let { sas ->
+                JoinSasDialog(sas = sas, onDismiss = { EngineHolder.clearJoinSas() })
             }
         }
     }
@@ -173,21 +178,16 @@ private fun NoNetwork(onCreate: () -> Unit, onJoin: () -> Unit) {
 private fun NetworkBody(
     status: NetworkStatus,
     pendingJoins: List<EngineHolder.PendingJoin>,
-    joinSas: List<String>?,
     needsConsent: Boolean,
     onEnableRouting: () -> Unit,
     onToggleOnline: (Boolean) -> Unit,
     onMember: (MemberView) -> Unit,
     onApprove: (EngineHolder.PendingJoin) -> Unit,
     onDeny: (EngineHolder.PendingJoin) -> Unit,
-    onDismissJoinSas: () -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         item {
             HeaderCard(status, needsConsent, onEnableRouting, onToggleOnline)
-        }
-        if (joinSas != null) {
-            item { JoinSasCard(joinSas, onDismissJoinSas) }
         }
         items(pendingJoins, key = { it.nodeId }) { pj ->
             JoinRequestCard(pj, onApprove = { onApprove(pj) }, onDeny = { onDeny(pj) })
@@ -248,20 +248,23 @@ private fun HeaderCard(
 }
 
 @Composable
-private fun JoinSasCard(sas: List<String>, onDismiss: () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Text("Joining — verify these emojis", style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.size(8.dp))
-            Text(sas.joinToString("  "), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.size(8.dp))
-            Text(
-                "Ask the approving member to confirm they see the same sequence.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedButton(onClick = onDismiss) { Text("Dismiss") }
-        }
-    }
+private fun JoinSasDialog(sas: List<String>, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Verify these emojis") },
+        text = {
+            Column {
+                Text(sas.joinToString("  "), style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "You're joining. Confirm the approving device shows this same sequence " +
+                        "before they accept you.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Got it") } },
+    )
 }
 
 @Composable

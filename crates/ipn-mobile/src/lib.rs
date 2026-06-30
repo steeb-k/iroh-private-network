@@ -434,7 +434,11 @@ impl MobileEngine {
     pub fn attach_tun(&self, fd: i32) -> Result<()> {
         #[cfg(target_os = "android")]
         {
-            self.inner.engine.attach_tun_fd(fd)?;
+            // Must run inside the runtime: adopting the fd registers it with the
+            // tokio reactor (`AsyncFd`) and the pump is `tokio::spawn`ed — both
+            // panic ("no reactor running") if called outside a runtime context.
+            self.rt
+                .block_on(async { self.inner.engine.attach_tun_fd(fd) })?;
             Ok(())
         }
         #[cfg(not(target_os = "android"))]
@@ -450,7 +454,9 @@ impl MobileEngine {
     /// elsewhere.
     pub fn detach_tun(&self) {
         #[cfg(target_os = "android")]
-        self.inner.engine.detach_tun();
+        // In the runtime context too: dropping the `AsyncFd`-backed device
+        // deregisters it from the reactor.
+        self.rt.block_on(async { self.inner.engine.detach_tun() });
     }
 
     // --- Lifecycle ---------------------------------------------------------
