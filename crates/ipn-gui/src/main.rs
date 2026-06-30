@@ -281,6 +281,8 @@ fn main() -> glib::ExitCode {
         println!("nullgate {}", env!("CARGO_PKG_VERSION"));
         return glib::ExitCode::SUCCESS;
     }
+    #[cfg(windows)]
+    init_windows_app_id();
     let start_minimized =
         args.iter().any(|a| a == "--minimized") || std::env::var_os("NULLGATE_START_MINIMIZED").is_some();
 
@@ -1735,35 +1737,34 @@ fn show_about(window: &adw::ApplicationWindow) {
 
 /// Show a desktop notification (title + optional body).
 ///
-/// **No-op on Windows.** GLib's `GNotification` backend there creates its own
-/// notification-area icon (using the app icon) to host toasts — which shows up as
-/// a confusing *second* tray icon beside ours that does nothing. Until we wire
-/// native WinRT toasts (needs an AppUserModelID on the Start-menu shortcut), skip
-/// GNotification on Windows; the tray icon and the in-app "Join Request" chip
-/// already surface these events. Linux/macOS get real notifications.
+/// Linux/macOS use GLib's `GNotification`. **Windows uses native WinRT toasts**
+/// (Action Center) via [`windows_toast`] — NOT `GNotification`, whose Windows
+/// backend spawns a confusing second notification-area icon beside our tray icon.
+/// WinRT toasts need a registered AppUserModelID, set up once by
+/// [`init_windows_app_id`]. Repeats of the same title are throttled to once per 30s
+/// (a peer flapping offline/online during an update shouldn't burst toasts).
 fn notify(app: &adw::Application, title: &str, body: Option<&str>) {
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    // notify() is only ever called on the GTK main thread, so thread_local is safe.
+    thread_local! {
+        static LAST: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
+    }
+    let suppressed = LAST.with(|m| {
+        let mut m = m.borrow_mut();
+        let now = Instant::now();
+        if m.get(title).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(30)) {
+            return true;
+        }
+        m.insert(title.to_string(), now);
+        false
+    });
+    if suppressed {
+        return;
+    }
+
     #[cfg(not(windows))]
     {
-        use std::collections::HashMap;
-        use std::time::{Duration, Instant};
-        // Throttle repeats of the same notification (e.g. a peer flapping
-        // offline/online during an update) to at most once per 30s. Keyed by title;
-        // notify() is only ever called on the GTK main thread, so thread_local is safe.
-        thread_local! {
-            static LAST: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
-        }
-        let suppressed = LAST.with(|m| {
-            let mut m = m.borrow_mut();
-            let now = Instant::now();
-            if m.get(title).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(30)) {
-                return true;
-            }
-            m.insert(title.to_string(), now);
-            false
-        });
-        if suppressed {
-            return;
-        }
         let n = gtk::gio::Notification::new(title);
         if let Some(b) = body {
             n.set_body(Some(b));
@@ -1771,7 +1772,46 @@ fn notify(app: &adw::Application, title: &str, body: Option<&str>) {
         app.send_notification(None, &n);
     }
     #[cfg(windows)]
-    let _ = (app, title, body);
+    {
+        let _ = app;
+        windows_toast(title, body);
+    }
+}
+
+/// Show a native Windows toast (Action Center). Attributed to our registered
+/// AppUserModelID (see [`init_windows_app_id`]); failures are non-fatal.
+#[cfg(windows)]
+fn windows_toast(title: &str, body: Option<&str>) {
+    use tauri_winrt_notification::Toast;
+    let mut toast = Toast::new(APP_ID).title(title);
+    if let Some(b) = body {
+        toast = toast.text1(b);
+    }
+    if let Err(e) = toast.show() {
+        tracing::debug!("windows toast failed: {e}");
+    }
+}
+
+/// Windows: bind this process to our AppUserModelID and register it under HKCU so
+/// WinRT toasts are permitted and attributed to "Nullgate" (the host exe otherwise).
+/// `ToastNotificationManager` refuses to show toasts for an unregistered AUMID.
+/// Idempotent — safe to call on every launch; the MSI shortcut carries the same id.
+#[cfg(windows)]
+fn init_windows_app_id() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+    }
+    let wide: Vec<u16> = OsStr::new(APP_ID).encode_wide().chain(std::iter::once(0)).collect();
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(wide.as_ptr());
+    }
+    let hkcu = winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
+    if let Ok((key, _)) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{APP_ID}")) {
+        let _ = key.set_value("DisplayName", &"Nullgate");
+    }
 }
 
 /// Notify when a member transitions offline→online (skips the first render).
@@ -1820,7 +1860,13 @@ fn sas_label(sas: &[String]) -> gtk::Box {
         for _ in 0..count {
             let Some(e) = sas.get(idx) else { break };
             let lbl = gtk::Label::new(None);
-            lbl.set_markup(&format!("<span size='350%'>{}</span>", glib::markup_escape_text(e)));
+            // Pin an emoji-capable font so glyphs like ✂️ render in color instead of
+            // tofu: the window CSS pins "Segoe UI Variable Text", which lacks many
+            // emoji and (with that override in place) doesn't reliably fall back.
+            lbl.set_markup(&format!(
+                "<span size='350%' font_family='Segoe UI Emoji,Noto Color Emoji,Apple Color Emoji,sans-serif'>{}</span>",
+                glib::markup_escape_text(e)
+            ));
             row.append(&lbl);
             idx += 1;
         }

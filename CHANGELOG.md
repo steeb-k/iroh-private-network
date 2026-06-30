@@ -3,6 +3,19 @@
 All notable changes to Nullgate. Format follows [Keep a Changelog](https://keepachangelog.com).
 Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
+## [Unreleased]
+### Fixed
+- **Windows desktop notifications work again.** They were silently dropped (a workaround for a
+  stray second tray icon). Nullgate now shows **native Action Center toasts** on Windows — the
+  "running in the tray" notice the first time you close the window, plus peer-online and
+  join-request alerts — via WinRT instead of GLib's `GNotification` (whose Windows backend spawned
+  the extra tray icon). The app registers an AppUserModelID (`io.github.steeb_k.Nullgate`) at
+  startup and on the Start-menu shortcut so toasts are attributed to Nullgate. The 30s
+  same-message throttle now applies on all platforms.
+- **Verification-code emoji render in color on Windows** (e.g. ✂️ showed as a tofu box). The SAS
+  emojis now pin an emoji-capable font (Segoe UI Emoji / Noto Color Emoji / Apple Color Emoji)
+  rather than inheriting the pinned `Segoe UI Variable Text` UI font, which lacks several glyphs.
+
 ## [0.1.4]
 ### Changed
 - **Join-ticket and recovery-code prefixes rebranded.** Tickets now start `ng1…` and originator

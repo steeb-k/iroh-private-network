@@ -129,7 +129,12 @@
       <Component Id="StartMenuShortcut" Guid="*">
         <Shortcut Id="GuiStartMenu" Name="Nullgate"
                   Description="Open the Nullgate app"
-                  Target="[INSTALLFOLDER]bin\nullgate.exe" Icon="AppIcon" />
+                  Target="[INSTALLFOLDER]bin\nullgate.exe" Icon="AppIcon">
+          <!-- Bind the Start-menu shortcut to our AppUserModelID so native WinRT
+               toasts (close-to-tray, peer online, join requests) are attributed to
+               Nullgate. The app also self-registers this id at startup. -->
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="io.github.steeb_k.Nullgate" />
+        </Shortcut>
         <RegistryValue Root="HKCU" Key="Software\Nullgate" Name="startmenu"
                        Type="integer" Value="1" KeyPath="yes" />
       </Component>
