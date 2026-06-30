@@ -16,7 +16,13 @@ pub use ipn_core::{AuditEntry, MemberView, NetworkStatus};
 
 /// IPC wire-protocol version between the GUI/CLI and the daemon. Bump on any
 /// incompatible change to these request/response/event types.
-pub const PROTO_VERSION: u32 = 1;
+///
+/// v2 (0.1.5): added the privilege-tier / access-control requests
+/// (`SetMemberRole`, `GetControllerTicket`, `SetPeerTicketSingleUse`,
+/// `SetRemoteAccessDisabled`, `SetHidden`, `GetAuditLog`) and the `AuditLog`
+/// response. A v1 daemon can't decode these, so the version handshake must reject
+/// the pairing rather than let requests silently fail.
+pub const PROTO_VERSION: u32 = 2;
 
 /// Where the GUI and daemon rendezvous. On Windows this path is only hashed into
 /// a named-pipe name; on Unix it's the actual socket path (fixed, not `$TMPDIR`,

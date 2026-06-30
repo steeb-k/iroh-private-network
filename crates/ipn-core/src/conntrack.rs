@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 
-use crate::router::{flow_key, FlowKey};
+use crate::router::{flow_key, is_tcp_initiation, FlowKey};
 
 /// Idle lifetime of a tracked flow. Long enough to cover a quiet RDP/SSH session
 /// between keepalives; short enough that the table self-trims.
@@ -30,12 +30,30 @@ pub struct Conntrack {
 }
 
 impl Conntrack {
-    /// Record a flow we initiated (called on every outbound TUN→mesh packet so an
-    /// already-established connection keeps working if the block is toggled on
-    /// mid-session). `now` is the engine's coarse clock (ms).
+    /// Record/refresh a flow **we initiated** (called on every outbound TUN→mesh
+    /// packet). `now` is the engine's coarse clock (ms).
+    ///
+    /// Direction matters: a flow is *created* only when we open it — a TCP SYN
+    /// (client opening a connection), or the first packet of a UDP/other flow.
+    /// Server-side responses (TCP packets with ACK, no SYN) only **refresh** a
+    /// flow that already exists; they never create one. So an inbound connection
+    /// to one of our services never becomes "established" in the table, and
+    /// enabling the block cuts it — while our own outbound sessions, refreshed by
+    /// their ongoing traffic, stay alive.
     pub fn record_outbound(&self, pkt: &[u8], now: u64) {
-        if let Some(k) = flow_key(pkt) {
-            self.flows.write().unwrap().insert(k, now);
+        let Some(k) = flow_key(pkt) else { return };
+        let mut flows = self.flows.write().unwrap();
+        if k.proto == 6 {
+            // TCP: create only on a client SYN; otherwise just refresh if present.
+            if is_tcp_initiation(pkt) {
+                flows.insert(k, now);
+            } else if let Some(t) = flows.get_mut(&k) {
+                *t = now;
+            }
+        } else {
+            // UDP/ICMP/etc.: no handshake to read direction from — the first
+            // outbound packet opens the flow.
+            flows.insert(k, now);
         }
     }
 
@@ -69,15 +87,19 @@ mod tests {
     use super::*;
     use std::net::Ipv4Addr;
 
-    /// Minimal IPv4 TCP packet with the given addresses/ports.
-    fn tcp(src: Ipv4Addr, dst: Ipv4Addr, sport: u16, dport: u16) -> Vec<u8> {
-        let mut p = vec![0u8; 24];
+    const SYN: u8 = 0x02;
+    const ACK: u8 = 0x10;
+
+    /// IPv4 TCP packet (full 20-byte TCP header so the flags byte is present).
+    fn tcp(src: Ipv4Addr, dst: Ipv4Addr, sport: u16, dport: u16, flags: u8) -> Vec<u8> {
+        let mut p = vec![0u8; 40]; // 20 IP + 20 TCP
         p[0] = 0x45; // v4, IHL 5
         p[9] = 6; // TCP
         p[12..16].copy_from_slice(&src.octets());
         p[16..20].copy_from_slice(&dst.octets());
         p[20..22].copy_from_slice(&sport.to_be_bytes());
         p[22..24].copy_from_slice(&dport.to_be_bytes());
+        p[33] = flags; // TCP flags at ihl(20) + 13
         p
     }
 
@@ -87,17 +109,40 @@ mod tests {
         let peer = Ipv4Addr::new(10, 99, 0, 5);
         let ct = Conntrack::default();
 
-        // We initiate me:51000 -> peer:22.
-        let out = tcp(me, peer, 51000, 22);
-        ct.record_outbound(&out, 1000);
+        // We initiate me:51000 -> peer:22 (client SYN) -> flow created.
+        ct.record_outbound(&tcp(me, peer, 51000, 22, SYN), 1000);
 
         // Peer's reply (peer:22 -> me:51000) is allowed.
-        let reply = tcp(peer, me, 22, 51000);
-        assert!(ct.allows_inbound(&reply, 1001));
+        assert!(ct.allows_inbound(&tcp(peer, me, 22, 51000, ACK), 1001));
 
         // An unsolicited inbound (peer:40000 -> me:3389) is dropped.
-        let unsolicited = tcp(peer, me, 40000, 3389);
-        assert!(!ct.allows_inbound(&unsolicited, 1001));
+        assert!(!ct.allows_inbound(&tcp(peer, me, 40000, 3389, SYN), 1001));
+    }
+
+    #[test]
+    fn server_response_does_not_open_a_flow() {
+        // The core one-way property: a connection INBOUND to one of our services
+        // never becomes "established" in the table, because our server's replies
+        // (SYN-ACK / ACK, no client SYN) don't create a flow. So enabling the
+        // block cuts an already-open inbound session.
+        let me = Ipv4Addr::new(10, 99, 0, 2);
+        let peer = Ipv4Addr::new(10, 99, 0, 5);
+        let ct = Conntrack::default();
+        ct.record_outbound(&tcp(me, peer, 3389, 50000, SYN | ACK), 1000);
+        ct.record_outbound(&tcp(me, peer, 3389, 50000, ACK), 1001);
+        assert!(!ct.allows_inbound(&tcp(peer, me, 50000, 3389, ACK), 1002));
+    }
+
+    #[test]
+    fn our_outbound_session_stays_alive() {
+        // A session WE initiated keeps working across the TTL because our ongoing
+        // (non-SYN) outbound traffic refreshes the flow.
+        let me = Ipv4Addr::new(10, 99, 0, 2);
+        let peer = Ipv4Addr::new(10, 99, 0, 5);
+        let ct = Conntrack::default();
+        ct.record_outbound(&tcp(me, peer, 51000, 22, SYN), 1000);
+        ct.record_outbound(&tcp(me, peer, 51000, 22, ACK), 1000 + 100_000); // refresh
+        assert!(ct.allows_inbound(&tcp(peer, me, 22, 51000, ACK), 1000 + 150_000));
     }
 
     #[test]
@@ -105,9 +150,8 @@ mod tests {
         let me = Ipv4Addr::new(10, 99, 0, 2);
         let peer = Ipv4Addr::new(10, 99, 0, 5);
         let ct = Conntrack::default();
-        ct.record_outbound(&tcp(me, peer, 51000, 22), 1000);
-        let reply = tcp(peer, me, 22, 51000);
-        // Past the TTL the reply no longer matches.
-        assert!(!ct.allows_inbound(&reply, 1000 + FLOW_TTL_MS + 1));
+        ct.record_outbound(&tcp(me, peer, 51000, 22, SYN), 1000);
+        // Past the TTL with no refresh, the reply no longer matches.
+        assert!(!ct.allows_inbound(&tcp(peer, me, 22, 51000, ACK), 1000 + FLOW_TTL_MS + 1));
     }
 }

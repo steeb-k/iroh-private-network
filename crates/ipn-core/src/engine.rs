@@ -284,6 +284,9 @@ struct Inner {
     /// Coarse wall-clock (ms), refreshed each tick — read by the per-packet pump
     /// to stamp/age conntrack flows without a syscall per packet.
     coarse_now: AtomicU64,
+    /// Inbound packets dropped by the one-way block since the last tick (logged
+    /// per-interval so the block is observable in the daemon log).
+    blocked_inbound: AtomicU64,
     /// Abort handles for network-scoped background tasks (presence receiver, TUN
     /// read loop) so leaving/deleting a network stops them cleanly.
     net_tasks: StdMutex<Vec<tokio::task::AbortHandle>>,
@@ -351,6 +354,7 @@ impl Engine {
             hidden: AtomicBool::new(prefs.hidden),
             conntrack: Conntrack::default(),
             coarse_now: AtomicU64::new(0),
+            blocked_inbound: AtomicU64::new(0),
             net_tasks: StdMutex::new(Vec::new()),
             was_member: AtomicBool::new(false),
             protocol_version: AtomicU32::new(admission::PROTOCOL_VERSION),
@@ -937,6 +941,10 @@ impl Engine {
         self.inner
             .remote_access_disabled
             .store(disabled, Ordering::Relaxed);
+        tracing::info!(
+            "remote access {}",
+            if disabled { "DISABLED — inbound blocked" } else { "enabled" }
+        );
         self.persist_prefs();
         let _ = self.inner.events.send(EngineEvent::Changed);
         Ok(())
@@ -946,6 +954,10 @@ impl Engine {
     /// implies the inbound block (the effective block is `disabled || hidden`).
     pub async fn set_hidden(&self, hidden: bool) -> Result<()> {
         self.inner.hidden.store(hidden, Ordering::Relaxed);
+        tracing::info!(
+            "device {} member list",
+            if hidden { "HIDDEN from (inbound blocked)" } else { "visible in" }
+        );
         self.persist_prefs();
         let _ = self.inner.events.send(EngineEvent::Changed);
         Ok(())
@@ -1328,6 +1340,10 @@ async fn tick(inner: &Arc<Inner>) -> Result<()> {
     let now_coarse = now_ms();
     inner.coarse_now.store(now_coarse, Ordering::Relaxed);
     inner.conntrack.sweep(now_coarse);
+    let dropped = inner.blocked_inbound.swap(0, Ordering::Relaxed);
+    if dropped > 0 {
+        tracing::info!("one-way block: dropped {dropped} unsolicited inbound packet(s)");
+    }
 
     let (doc, cfg) = {
         let st = inner.state.lock().await;
@@ -1798,6 +1814,7 @@ async fn register_mesh(inner: &Arc<Inner>, peer: Id, conn: Connection) {
                                     .conntrack
                                     .allows_inbound(&pkt, inner.coarse_now.load(Ordering::Relaxed))
                             {
+                                inner.blocked_inbound.fetch_add(1, Ordering::Relaxed);
                                 continue;
                             }
                             // Clamp inbound TCP SYNs too (bounds the other direction).

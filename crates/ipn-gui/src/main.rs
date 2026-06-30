@@ -1439,10 +1439,14 @@ fn fill_member(
     if m.is_self && self_role != "peer" {
         let dev = adw::PreferencesGroup::builder().title("This device").build();
 
+        // The block is on whenever access is disabled *or* the device is hidden
+        // (hiding implies the block). While hidden, the switch is forced on and
+        // locked — its enabling is implicit.
         let block_sw = gtk::Switch::builder()
-            .active(m.access_disabled)
+            .active(m.access_disabled || m.hidden)
             .valign(gtk::Align::Center)
             .build();
+        block_sw.set_sensitive(!m.hidden);
         {
             let net2 = net.clone();
             block_sw.connect_state_set(move |_, state| {
@@ -1470,7 +1474,14 @@ fn fill_member(
             .build();
         {
             let net2 = net.clone();
+            let block_sw = block_sw.clone();
             hide_sw.connect_state_set(move |_, state| {
+                // Hiding implies the block: turn it on and lock the switch. Releasing
+                // hide just unlocks it again (the block stays until manually cleared).
+                if state {
+                    block_sw.set_active(true);
+                }
+                block_sw.set_sensitive(!state);
                 net2.request(IpcRequest::SetHidden { hidden: state }, |r| match r {
                     Ok(IpcResponse::Ok) => Some(UiMsg::Refresh),
                     Ok(IpcResponse::Err(e)) => Some(UiMsg::Toast(e)),

@@ -85,6 +85,27 @@ impl FlowKey {
     }
 }
 
+/// The TCP flags byte of an IPv4 TCP packet, or `None` if it isn't IPv4 TCP.
+pub fn tcp_flags(pkt: &[u8]) -> Option<u8> {
+    if pkt.len() < 20 || (pkt[0] >> 4) != 4 {
+        return None;
+    }
+    let ihl = ((pkt[0] & 0x0f) as usize) * 4;
+    if pkt[9] != 6 || pkt.len() < ihl + 14 {
+        return None;
+    }
+    Some(pkt[ihl + 13])
+}
+
+/// Whether `pkt` is a TCP **connection initiation** (SYN set, ACK clear) — i.e.
+/// the sender is opening a new connection (a client), not responding to one.
+pub fn is_tcp_initiation(pkt: &[u8]) -> bool {
+    match tcp_flags(pkt) {
+        Some(f) => (f & 0x02) != 0 && (f & 0x10) == 0,
+        None => false,
+    }
+}
+
 /// Parse an IPv4 packet's 5-tuple, or `None` if it isn't IPv4 / is too short.
 pub fn flow_key(pkt: &[u8]) -> Option<FlowKey> {
     if pkt.len() < 20 || (pkt[0] >> 4) != 4 {

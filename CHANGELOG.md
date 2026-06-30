@@ -3,7 +3,7 @@
 All notable changes to Nullgate. Format follows [Keep a Changelog](https://keepachangelog.com).
 Pre-1.0; prereleases are tagged `v<version>-test<N>`.
 
-## [Unreleased]
+## [0.1.6]
 ### Added
 - **Privilege tiers — Originator, Controller, Peer.** Membership now carries a role. **Peers**
   use the network and view the activity log, but can't approve devices or view join tickets.
@@ -42,6 +42,17 @@ Pre-1.0; prereleases are tagged `v<version>-test<N>`.
   flags — upgrade all devices together.
 
 ### Fixed
+- **The one-way block now cuts already-open inbound sessions, not just new ones.** "Disable remote
+  access" tracks the connections *you* initiate and only lets matching return traffic back in — but
+  it was recording your own services' replies as if you'd initiated them, so a session someone
+  already had *into* your machine kept working after you flipped the block on. It now only treats a
+  flow as self-initiated on a real client open (a TCP SYN, or the first packet of a UDP flow);
+  server-side replies just refresh an existing flow. So enabling the block severs in-progress
+  inbound sessions while your own outbound sessions stay up. The daemon also logs when the block is
+  toggled and how many inbound packets it drops.
+- **The "Hide this device" switch now turns on and locks the "Disable remote access" switch**
+  (its enabling is implicit), and the IPC protocol version was bumped to **2** so a GUI can't
+  silently talk to an older daemon that doesn't understand the new tier/access requests.
 - **Windows desktop notifications work again.** They were silently dropped (a workaround for a
   stray second tray icon). Nullgate now shows **native Action Center toasts** on Windows — the
   "running in the tray" notice the first time you close the window, plus peer-online and
